@@ -5,3 +5,4 @@ deepface
 mysql-connector-python
 qdrant-client
 minio
+pydantic
