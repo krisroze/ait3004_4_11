@@ -1,0 +1,14 @@
+# General
+.DS_Store
+.env
+
+# Backend
+backend/__pycache__/
+backend/.pytest_cache/
+backend/venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+frontend/package-lock.json (optional, but node_modules is mandatory to ignore)
