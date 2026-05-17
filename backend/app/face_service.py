@@ -5,8 +5,12 @@ import os
 from deepface import DeepFace
 
 
-REFERENCE_IMAGE = "reference_faces/user.png"
+from pathlib import Path
 
+REFERENCE_IMAGES = [
+    str(p) for p in Path("reference_faces").glob("*")
+    if p.suffix.lower() in [".jpg", ".png"]
+]
 
 def verify_face(image_data: str) -> bool:
     try:
