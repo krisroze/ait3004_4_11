@@ -6,3 +6,6 @@ mysql-connector-python
 qdrant-client
 minio
 pydantic
+sqlalchemy
+pymysql
+cryptography

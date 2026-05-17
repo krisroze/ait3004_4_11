@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.verify import router as verify_router
 
+from app.database import engine
+from app.models import Transfer
+
+Transfer.__table__.create(bind=engine, checkfirst=True)
+
 app = FastAPI()
 
 app.add_middleware(
