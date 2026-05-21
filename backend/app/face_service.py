@@ -6,6 +6,11 @@ from pathlib import Path
 
 REFERENCE_FOLDER = "reference_faces"
 
+# 🎯 ĐỊNH NGHĨA NGƯỠNG AN TOÀN (FINETUNE THRESHOLD)
+# Với mô hình VGG-Face, mặc định thư viện là 0.40.
+# Vì đây là ứng dụng Thanh toán (Face Payment App), ta siết chặt xuống 0.35 để an toàn hơn.
+MATCH_THRESHOLD = 0.35
+
 def verify_face(image_data: str):
     try:
         # xử lý base64
@@ -29,15 +34,23 @@ def verify_face(image_data: str):
         
         os.remove(temp_path)
 
-        # result[0] là dataframe match
+        # result[0] là dataframe chứa danh sách những người giống nhất
         if len(result[0]) == 0:
             return None
 
+        # Lấy người có tỉ lệ giống nhất (đứng đầu danh sách)
         best_match = result[0].iloc[0]
+        distance = float(best_match["distance"])
+
+        # 🛠️ CHỐT CHẶN BẢO MẬT: Kiểm tra xem có phải người lạ không
+        # Nếu khoảng cách lớn hơn ngưỡng quy định -> Coi như người lạ, từ chối nhận diện!
+        if distance > MATCH_THRESHOLD:
+            print(f"[AI Alert] Phat hien nguoi la! Khoang cach gan nhat la {distance} (Vuot nguong an toan {MATCH_THRESHOLD})")
+            return None
 
         return {
             "identity": Path(best_match["identity"]).stem,
-            "distance": float(best_match["distance"])
+            "distance": distance
         }
 
     except Exception as e:

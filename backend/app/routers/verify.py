@@ -9,7 +9,7 @@ from app.minio_service import upload_base64_image
 
 router = APIRouter()
 
-
+# API CŨ (Giữ lại để không lỗi mã cũ)
 @router.post("/api/verify-face")
 def verify_face_api(request: VerifyRequest):
     # Xác thực khuôn mặt
@@ -18,6 +18,7 @@ def verify_face_api(request: VerifyRequest):
     # Upload ảnh lên MinIO
     snapshot_url = upload_base64_image(request.image_data)
     print("Snapshot URL:", snapshot_url)
+    
     # Kết nối database
     db = SessionLocal()
 
@@ -50,10 +51,15 @@ def verify_face_api(request: VerifyRequest):
         }
 
 
-@router.get("/api/transfers")
-def get_transfers():
+# =========================================================
+# ĐÃ SỬA: Đổi từ "/api/transfers" thành "/api/history" 
+# để khớp với Frontend
+# =========================================================
+@router.get("/api/history")
+def get_history():
     db = SessionLocal()
 
+    # Lấy dữ liệu sắp xếp mới nhất lên đầu
     transfers = db.query(Transfer).order_by(
         Transfer.id.desc()
     ).all()
@@ -67,8 +73,8 @@ def get_transfers():
             "account_number": t.account_number,
             "amount": t.amount,
             "status": t.status,
-            "transaction_time": t.transaction_time.strftime("%H:%M:%S %d/%m/%Y")
-            if t.transaction_time else None,
+            # ĐÃ SỬA: Đổi tên key thành 'time' để Frontend nhận diện được
+            "time": t.transaction_time.strftime("%H:%M:%S %d/%m/%Y") if t.transaction_time else None,
             "snapshot_url": t.snapshot_url
         })
 
