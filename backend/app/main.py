@@ -2,8 +2,8 @@ import os
 import base64
 import glob
 import uuid  # Thêm thư viện để tạo tên file tạm thời khi quét mặt login
-import tempfile  # THÊM MỚI: Phục vụ lưu file ảnh tạm khi chuyển tiền
-import datetime  # THÊM MỚI: Ghi nhận thời gian giao dịch thực tế
+import tempfile  # PHỤC VỤ lưu file ảnh tạm khi chuyển tiền
+import datetime  # GHI NHẬN thời gian giao dịch thực tế
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -14,10 +14,13 @@ from deepface import DeepFace  # Import DeepFace để phục vụ việc quét 
 from app.routers.verify import router as verify_router
 from app.database import engine, get_db, Base
 from app.models import Transfer, User
-from app.schemas import UserRegisterRequest, UserResponse, TransferExecutionRequest  # CẬP NHẬT: Thêm TransferExecutionRequest
-from app.minio_service import upload_base64_image  # THÊM MỚI: Service đẩy ảnh giao dịch lên MinIO
+from app.schemas import UserRegisterRequest, UserResponse, TransferExecutionRequest  
+from app.minio_service import upload_base64_image  # Service đẩy ảnh giao dịch lên MinIO
 
-# Tự động tạo TẤT CẢ các bảng (cả Transfer cũ và User mới) nếu chưa có
+# ======================================================================
+
+
+# Tự động tạo TẤT CẢ các bảng mới trống trơn nếu chưa có
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -31,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Kéo các API quét mặt cũ vào
+# Kéo các API quét mặt từ router verify vào
 app.include_router(verify_router)
 
 
@@ -46,12 +49,12 @@ class UpdateFaceRequest(BaseModel):
     account_number: str
     image_data: str
 
-# --- THÊM MỚI: Schema nhận yêu cầu đổi mật khẩu ---
+# Schema nhận yêu cầu đổi mật khẩu
 class ResetPasswordRequest(BaseModel):
     account_number: str
     new_password: str
 
-# --- THÊM MỚI: Schema nhận ảnh chụp từ camera để quét mặt login ---
+# Schema nhận ảnh chụp từ camera để quét mặt login
 class FaceLoginRequest(BaseModel):
     image_data: str
 
@@ -77,19 +80,19 @@ def login_user(request: UserLoginRequest, db: Session = Depends(get_db)):
         "message": "Đăng nhập thành công!",
         "fullname": user.fullname,
         "balance": user.balance,
-        "account_number": user.account_number
+        "account_number": user.account_number,
+        "phone_number": user.phone_number  # ĐÃ THÊM: Trả về số điện thoại khi đăng nhập thành công
     }
 
 
 # ==========================================
-# API ĐĂNG NHẬP BẰNG KHUÔN MẶT (MỚI)
+# API ĐĂNG NHẬP BẰNG KHUÔN MẶT (1:N DEEPFACE FIND)
 # ==========================================
 @app.post("/api/login-face", status_code=status.HTTP_200_OK)
 def login_by_face(request: FaceLoginRequest, db: Session = Depends(get_db)):
     REFERENCE_FOLDER = "reference_faces"
     TEMP_FOLDER = "temp_login_faces"
     
-    # Kiểm tra xem hệ thống đã có dữ liệu mẫu khuôn mặt nào chưa
     if not os.path.exists(REFERENCE_FOLDER) or not os.listdir(REFERENCE_FOLDER):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -127,9 +130,7 @@ def login_by_face(request: FaceLoginRequest, db: Session = Depends(get_db)):
         if len(dfs) > 0 and not dfs[0].empty:
             # Lấy đường dẫn của bức ảnh khớp nhất ở dòng đầu tiên
             matched_image_path = dfs[0].iloc[0]['identity']
-            # Lấy tên file (Ví dụ: "23072006.jpg")
             filename = os.path.basename(matched_image_path)
-            # Tách đuôi file để lấy Số tài khoản gốc (Ví dụ: "23072006")
             account_number = os.path.splitext(filename)[0]
 
             # 5. Tìm thông tin người dùng trong cơ sở dữ liệu dựa trên Số tài khoản vừa tìm được
@@ -140,10 +141,10 @@ def login_by_face(request: FaceLoginRequest, db: Session = Depends(get_db)):
                     "message": f"Xin chào {user.fullname}, Đăng nhập khuôn mặt thành công!",
                     "fullname": user.fullname,
                     "balance": user.balance,
-                    "account_number": user.account_number
+                    "account_number": user.account_number,
+                    "phone_number": user.phone_number  # ĐÃ THÊM: Trả về số điện thoại sau khi quét mặt thành công
                 }
 
-        # Nếu quét xong không tìm ra ai trùng khớp trên database
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Không nhận diện được khuôn mặt hoặc tài khoản chưa đăng ký FaceID!"
@@ -158,11 +159,10 @@ def login_by_face(request: FaceLoginRequest, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# API KHÔI PHỤC / ĐỔI MẬT KHẨU (MỚI)
+# API KHÔI PHỤC / ĐỔI MẬT KHẨU
 # ==========================================
 @app.post("/api/reset-password", status_code=status.HTTP_200_OK)
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
-    # 1. Kiểm tra xem tài khoản cần đổi mật khẩu có tồn tại trong DB không
     user = db.query(User).filter(User.account_number == request.account_number).first()
     
     if not user:
@@ -172,9 +172,8 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
         )
         
     try:
-        # 2. Cập nhật mật khẩu mới vào cột password của bảng User
         user.password = request.new_password
-        db.commit()  # Lưu thay đổi xuống Database vật lý
+        db.commit()  # Lưu thay đổi xuống Database
         
         return {
             "status": "success", 
@@ -191,7 +190,7 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 # ==========================================
-# API ĐĂNG KÝ TÀI KHOẢN MỚI
+# API ĐĂNG KÝ TÀI KHOẢN MỚI (ĐÃ CẬP NHẬT SỐ ĐIỆN THOẠI)
 # ==========================================
 @app.post("/api/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(request: UserRegisterRequest, db: Session = Depends(get_db)):
@@ -201,6 +200,14 @@ def register_user(request: UserRegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Số tài khoản này đã được đăng ký trên hệ thống!"
+        )
+
+    # ĐÃ THÊM: KIỂM TRA TRÙNG LẶP SỐ ĐIỆN THOẠI
+    existing_phone = db.query(User).filter(User.phone_number == request.phone_number).first()
+    if existing_phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Số điện thoại này đã gắn liền với một tài khoản khác!"
         )
 
     try:
@@ -225,9 +232,10 @@ def register_user(request: UserRegisterRequest, db: Session = Depends(get_db)):
             os.remove(pkl_file)
             print(f"[AI Cache] Đã tự động xóa file cache: {pkl_file}")
 
-        # 4. GHI THÔNG TIN VÀO DATABASE
+        # 4. GHI THÔNG TIN VÀO DATABASE (ĐÃ THÊM ĐỦ PHONE NUMBER)
         new_user = User(
             fullname=request.fullname,
+            phone_number=request.phone_number,  # ĐÃ THÊM: Lưu số điện thoại vào database
             account_number=request.account_number,
             bank_name=request.bank_name,
             password=request.password, 
@@ -251,23 +259,20 @@ def register_user(request: UserRegisterRequest, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# API CẬP NHẬT FACE ID (MỚI)
+# API CẬP NHẬT FACE ID
 # ==========================================
 @app.post("/api/update-face", status_code=status.HTTP_200_OK)
 def update_face(request: UpdateFaceRequest, db: Session = Depends(get_db)):
-    # 1. Kiểm tra user có tồn tại không
     user = db.query(User).filter(User.account_number == request.account_number).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy thông tin người dùng!")
 
     try:
-        # 2. Xử lý ảnh mới
         image_data = request.image_data
         if "," in image_data:
             image_data = image_data.split(",")[1]
         image_bytes = base64.b64decode(image_data)
 
-        # 3. Ghi đè file ảnh cũ (cùng tên với số tài khoản)
         REFERENCE_FOLDER = "reference_faces"
         os.makedirs(REFERENCE_FOLDER, exist_ok=True)
         image_name = f"{request.account_number}.jpg"
@@ -276,7 +281,6 @@ def update_face(request: UpdateFaceRequest, db: Session = Depends(get_db)):
         with open(image_path, "wb") as f:
             f.write(image_bytes)
 
-        # 4. Xóa Cache của AI để nó nhận diện ảnh mới ở lần chuyển tiền sau
         pkl_files = glob.glob(os.path.join(REFERENCE_FOLDER, "*.pkl"))
         for pkl_file in pkl_files:
             os.remove(pkl_file)
@@ -293,7 +297,7 @@ def update_face(request: UpdateFaceRequest, db: Session = Depends(get_db)):
 
 
 # =======================================================================
-# THÊM MỚI: API KIỂM TRA SỐ TÀI KHOẢN NGƯỜI NHẬN CÙNG NGÂN HÀNG
+# API KIỂM TRA SỐ TÀI KHOẢN NGƯỜI NHẬN CÙNG NGÂN HÀNG
 # =======================================================================
 @app.get("/api/check-recipient/{account_number}", status_code=status.HTTP_200_OK)
 def check_recipient(account_number: str, db: Session = Depends(get_db)):
@@ -313,14 +317,13 @@ def check_recipient(account_number: str, db: Session = Depends(get_db)):
 
 
 # =======================================================================
-# THÊM MỚI: API XÁC THỰC KHUÔN MẶT NGƯỜI GỬI & THỰC HIỆN GIAO DỊCH
+# API XÁC THỰC KHUÔN MẶT NGƯỜI GỬI & THỰC HIỆN GIAO DỊCH CHUYỂN TIỀN
 # =======================================================================
 @app.post("/api/execute-transfer", status_code=status.HTTP_200_OK)
 def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(get_db)):
     REFERENCE_FOLDER = "reference_faces"
-    MATCH_THRESHOLD = 0.35  # Ngưỡng an toàn bảo mật cao của ứng dụng thanh toán
+    MATCH_THRESHOLD = 0.35  
 
-    # 1. Kiểm tra tài khoản gửi, nhận và điều kiện số dư số tiền
     sender = db.query(User).filter(User.account_number == request.sender_account_number).first()
     recipient = db.query(User).filter(User.account_number == request.recipient_account_number).first()
 
@@ -333,7 +336,6 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
     if sender.balance < request.amount:
         raise HTTPException(status_code=400, detail="Số dư tài khoản của bạn không đủ!")
 
-    # 2. So khớp trực tiếp khuôn mặt người gửi (1vs1 Verification)
     sender_photo_name = f"{sender.account_number}.jpg"
     sender_photo_path = os.path.join(REFERENCE_FOLDER, sender_photo_name)
 
@@ -350,7 +352,6 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
             temp_file.write(image_bytes)
             temp_path = temp_file.name
 
-        # Dùng DeepFace.verify để so khớp trực tiếp ảnh gốc của chính tài khoản người gửi
         result = DeepFace.verify(
             img1_path=temp_path,
             img2_path=sender_photo_path,
@@ -363,7 +364,6 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
 
         distance = float(result["distance"])
         if distance > MATCH_THRESHOLD:
-            print(f"[Transfer Denied] Mặt không khớp chủ tài khoản! Khoảng cách: {distance}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Xác thực khuôn mặt thất bại! Bạn không phải chủ sở hữu tài khoản này."
@@ -372,19 +372,17 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
     except HTTPException as http_ex:
         raise http_ex
     except Exception as e:
-        print(f"[Face Verify Error] Lỗi kiểm tra mặt: {e}")
         raise HTTPException(status_code=500, detail="Lỗi hệ thống khi xác thực sinh trắc học.")
 
-    # 3. Trừ/Cộng số dư tài khoản và ghi nhận lịch sử vào bảng transfers
     try:
         sender.balance -= request.amount
         recipient.balance += request.amount
 
-        # Đẩy ảnh snapshot giao dịch lên MinIO lưu trữ chứng từ
         snapshot_url = upload_base64_image(request.image_data)
 
         # Tạo lịch sử lưu vào database
         new_transfer = Transfer(
+            transaction_type="transfer",  # ĐÃ THÊM: Gắn nhãn phân loại là chuyển tiền nội bộ
             recipient_name=recipient.fullname,
             account_number=recipient.account_number,
             amount=int(request.amount),
@@ -404,7 +402,6 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
 
     except Exception as e:
         db.rollback()
-        print(f"[Transfer Transaction Error] Lỗi dữ liệu giao dịch: {e}")
         raise HTTPException(status_code=500, detail="Giao dịch thất bại do lỗi hệ thống cơ sở dữ liệu.")
 
 

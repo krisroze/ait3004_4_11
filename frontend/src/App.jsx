@@ -48,9 +48,13 @@ export default function App() {
   const [loginInfo, setLoginInfo] = useState({ accountNumber: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [forgotInfo, setForgotInfo] = useState({ accountNumber: '', newPassword: '' });
-  const [registerInfo, setRegisterInfo] = useState({ fullname: '', accountNumber: '', bankName: 'VNU Bank', password: '' });
+  // CẬP NHẬT: Thêm phoneNumber vào form đăng ký tài khoản
+  const [registerInfo, setRegisterInfo] = useState({ fullname: '', phoneNumber: '', accountNumber: '', bankName: 'VNU Bank', password: '' });
   const [transactionInfo, setTransactionInfo] = useState({ recipientName: '', recipientBank: 'VNU Bank', accountNumber: '', amount: '', time: '' });
   const [isValidRecipient, setIsValidRecipient] = useState(false);
+  
+  // THÊM MỚI: State quản lý form nạp tiền điện thoại
+  const [topupInfo, setTopupInfo] = useState({ phoneNumber: '', amount: '50000' }); // Mặc định chọn gói 50k
 
   // ==========================================
   // LOGIC XỬ LÝ CHỨC NĂNG TÍCH HỢP BACKEND
@@ -70,7 +74,13 @@ export default function App() {
         password: loginInfo.password
       });
       if (response.status === 200) {
-        const userData = { fullname: response.data.fullname, balance: response.data.balance, accountNumber: response.data.account_number };
+        // CẬP NHẬT: Lưu thêm phoneNumber từ backend vào state người dùng hiện tại
+        const userData = { 
+          fullname: response.data.fullname, 
+          balance: response.data.balance, 
+          accountNumber: response.data.account_number,
+          phoneNumber: response.data.phone_number 
+        };
         setCurrentUser(userData);
         localStorage.setItem('vnu_remembered_user', JSON.stringify(userData));
         setRememberedUser(userData);
@@ -100,7 +110,13 @@ export default function App() {
         image_data: imageBase64
       });
       if (response.status === 200) {
-        const userData = { fullname: response.data.fullname, balance: response.data.balance, accountNumber: response.data.account_number };
+        // CẬP NHẬT: Lưu thêm phoneNumber khi quét mặt thành công
+        const userData = { 
+          fullname: response.data.fullname, 
+          balance: response.data.balance, 
+          accountNumber: response.data.account_number,
+          phoneNumber: response.data.phone_number
+        };
         setCurrentUser(userData);
         setMode('home'); 
         setStep(0);
@@ -112,25 +128,30 @@ export default function App() {
     }
   };
 
-  // 3. Khôi phục / Đổi mật khẩu khi quên
+  // 3. Khôi phục / Đổi mật khẩu khi quên (Có quét mặt)
   const handleForgotPasswordSubmit = async () => {
-    if (!forgotInfo.accountNumber || !forgotInfo.newPassword) {
-      setErrorMessage('❌ Vui lòng nhập Số tài khoản và Mật khẩu mới!');
+    const imageBase64 = webcamRef.current?.getScreenshot();
+    if (!imageBase64) {
+      setErrorMessage('❌ Lỗi Camera! Chưa chụp được ảnh khuôn mặt.');
+      setIsLoading(false);
       return;
     }
+
     setErrorMessage(''); setIsLoading(true);
     try {
       const response = await axios.post('http://127.0.0.1:8000/api/reset-password', {
         account_number: forgotInfo.accountNumber,
-        new_password: forgotInfo.newPassword
+        new_password: forgotInfo.newPassword,
+        image_data: imageBase64
       });
       if (response.status === 200) {
         alert("🎉 Đổi mật khẩu thành công! Vui lòng đăng nhập lại.");
         setForgotInfo({ accountNumber: '', newPassword: '' });
         setMode('login');
+        setStep(0);
       }
     } catch (error) {
-      setErrorMessage('❌ Lỗi đổi mật khẩu! Vui lòng kiểm tra lại số tài khoản.');
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Khuôn mặt không khớp hoặc sai số tài khoản!'));
     } finally { 
       setIsLoading(false); 
     }
@@ -138,24 +159,36 @@ export default function App() {
 
   // 4. Mở tài khoản mới kèm chụp FaceID
   const handleRegisterSubmit = async () => {
+    if (!registerInfo.fullname || !registerInfo.phoneNumber || !registerInfo.accountNumber || !registerInfo.password) {
+      setErrorMessage('❌ Vui lòng nhập đầy đủ tất cả các trường thông tin!');
+      return;
+    }
+
     setErrorMessage(''); setIsLoading(true);
     const imageBase64 = webcamRef.current?.getScreenshot();
     if (!imageBase64) {
-      setErrorMessage('❌ Chưa chụp được ảnh khuôn mặt!');
+      setErrorMessage('❌ Chưa chụp được ảnh khuôn mặt sinh trắc học!');
       setIsLoading(false);
       return;
     }
     try {
+      // CẬP NHẬT: Gửi thêm phone_number lên API đăng ký mới
       const response = await axios.post('http://127.0.0.1:8000/api/register', { 
         fullname: registerInfo.fullname, 
+        phone_number: registerInfo.phoneNumber,
         account_number: registerInfo.accountNumber, 
         bank_name: registerInfo.bankName, 
         password: registerInfo.password, 
         image_data: imageBase64 
       });
       if (response.status === 201) {
-        alert(`🎉 Đăng ký tài khoản thành công!`);
-        const userData = { fullname: response.data.fullname, balance: 500000, accountNumber: response.data.account_number };
+        alert(`🎉 Đăng ký tài khoản thành công! Khởi tạo tặng ngay 500.000 VND.`);
+        const userData = { 
+          fullname: response.data.fullname, 
+          balance: 500000, 
+          accountNumber: response.data.account_number,
+          phoneNumber: response.data.phone_number
+        };
         setCurrentUser(userData); 
         localStorage.setItem('vnu_remembered_user', JSON.stringify(userData)); 
         setRememberedUser(userData);
@@ -163,13 +196,13 @@ export default function App() {
         setStep(0);
       }
     } catch (error) { 
-      setErrorMessage('❌ Lỗi đăng ký! Số tài khoản có thể đã tồn tại.'); 
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Lỗi đăng ký! Số tài khoản hoặc số điện thoại đã tồn tại.')); 
     } finally { 
       setIsLoading(false); 
     }
   };
 
-  // 4.5 THÊM MỚI: Tự động kiểm tra số tài khoản người nhận trong cùng hệ thống VNU
+  // 4.5 Tự động kiểm tra số tài khoản người nhận trong cùng hệ thống VNU
   const handleCheckRecipient = async () => {
     if (!transactionInfo.accountNumber) {
       setErrorMessage('❌ Vui lòng nhập số tài khoản trước khi kiểm tra!');
@@ -195,7 +228,7 @@ export default function App() {
     }
   };
 
-  // 5. CẬP NHẬT: Xác thực FaceID thực hiện chuyển tiền
+  // 5. Xác thực FaceID thực hiện chuyển tiền
   const handleTransferFaceAuth = async () => {
     if (!currentUser) return;
     setErrorMessage(''); setIsLoading(true);
@@ -223,6 +256,41 @@ export default function App() {
       setErrorMessage('❌ ' + (error.response?.data?.detail || 'Giao dịch chuyển tiền thất bại!'));
     } finally { 
       setIsLoading(false); 
+    }
+  };
+
+  // THÊM MỚI: Xử lý Xác thực FaceID để thực hiện NẠP TIỀN ĐIỆN THOẠI
+  const handleTopupFaceAuth = async () => {
+    if (!currentUser) return;
+    if (!topupInfo.phoneNumber) {
+      setErrorMessage('❌ Vui lòng nhập số điện thoại cần nạp!');
+      return;
+    }
+    
+    setErrorMessage(''); setIsLoading(true);
+    const imageBase64 = webcamRef.current?.getScreenshot();
+    if (!imageBase64) {
+      setErrorMessage('❌ Lỗi Camera! Không thể chụp ảnh xác thực.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await axios.post('http://127.0.0.1:8000/api/topup', {
+        account_number: currentUser.accountNumber,
+        phone_number: topupInfo.phoneNumber,
+        amount: parseInt(topupInfo.amount),
+        image_data: imageBase64
+      });
+
+      if (response.data.status === 'success') {
+        setCurrentUser({ ...currentUser, balance: response.data.new_balance });
+        setStep(2); // Chuyển sang bước 2: Hiện màn hình thông báo thành công
+      }
+    } catch (error) {
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Giao dịch nạp tiền thất bại!'));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -323,7 +391,7 @@ export default function App() {
               <div className="relative w-full mb-5">
                 <input type={showPassword ? "text" : "password"} placeholder="Nhập mật khẩu" value={loginInfo.password} onChange={(e) => setLoginInfo({...loginInfo, password: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 pl-5 pr-24 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all box-sizing-border" />
                 <div className="absolute right-4 top-3.5 flex items-center gap-3.5 select-none">
-                  <span onClick={() => setShowPassword(!showPassword)} className="cursor-pointer text-lg">{showPassword ? '👁️‍🗨️' : '👁️'}</span>
+                  <span onClick={() => setShowPassword(!showPassword)} className="cursor-pointer text-lg">{showPassword ? '👁️‍eqn' : '👁️'}</span>
                   <span onClick={() => {setMode('login_face'); setErrorMessage('');}} className="cursor-pointer flex items-center" title="Đăng nhập Face ID">
                     <svg className="w-6 h-6 text-white/80 hover:text-white transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
@@ -344,7 +412,7 @@ export default function App() {
               <div className="relative w-full mb-5">
                 <input type={showPassword ? "text" : "password"} placeholder="Mật khẩu" value={loginInfo.password} onChange={(e) => setLoginInfo({...loginInfo, password: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 pl-5 pr-14 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all box-sizing-border" />
                 <div className="absolute right-4 top-4 text-lg select-none">
-                  <span onClick={() => setShowPassword(!showPassword)} className="cursor-pointer">{showPassword ? '👁️‍🗨️' : '👁️'}</span>
+                  <span onClick={() => setShowPassword(!showPassword)} className="cursor-pointer">{showPassword ? '👁️‍eqn' : '👁️'}</span>
                 </div>
               </div>
             </div>
@@ -356,7 +424,7 @@ export default function App() {
           </button>
 
           <div className="flex justify-between mt-6 text-xs font-bold tracking-wide text-white/90">
-            <span className="cursor-pointer hover:underline" onClick={() => {setMode('forgot_password'); setErrorMessage('');}}>QUÊN MẬT KHẨU?</span>
+            <span className="cursor-pointer hover:underline" onClick={() => {setMode('forgot_password'); setErrorMessage(''); setStep(0);}}>QUÊN MẬT KHẨU?</span>
             {rememberedUser ? (
               <span className="cursor-pointer hover:underline" onClick={handleSwitchAccount}>TÀI KHOẢN KHÁC</span>
             ) : (
@@ -368,35 +436,67 @@ export default function App() {
     </div>
   );
 
-  // MÀN HÌNH QUÊN MẬT KHẨU
-  if (mode === 'forgot_password') return (
-    <div className="bg-slate-200 min-h-screen flex justify-center items-center font-sans antialiased">
-      <div className="w-[375px] h-[812px] rounded-[40px] overflow-hidden shadow-2xl relative border-[8px] border-slate-900 bg-gradient-to-br from-blue-700 to-indigo-900 text-white flex flex-col">
-        <div className="p-6 flex justify-between items-center">
-          <div className="text-2xl cursor-pointer" onClick={() => {setMode('login'); setErrorMessage('');}}>‹</div>
-          <div className="text-sm font-bold">Khôi phục mật khẩu</div>
-          <div className="w-6"></div>
-        </div>
-        <div className="flex-1 px-8 flex flex-col justify-center pb-24">
-          <div className="text-center mb-4 text-5xl">🔐</div>
-          <p className="text-white/80 text-center mb-6 text-xs px-2">Vui lòng nhập số tài khoản ngân hàng và thiết lập mật khẩu mới muốn thay đổi.</p>
-          
-          <div className="w-full mb-4">
-            <input type="text" placeholder="Số tài khoản của bạn" value={forgotInfo.accountNumber} onChange={(e) => setForgotInfo({...forgotInfo, accountNumber: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 px-5 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all" />
-          </div>
-          <div className="w-full mb-5">
-            <input type="password" placeholder="Mật khẩu mới hoàn toàn" value={forgotInfo.newPassword} onChange={(e) => setForgotInfo({...forgotInfo, newPassword: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 px-5 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all" />
-          </div>
+  // ==========================================
+  // MÀN HÌNH QUÊN MẬT KHẨU (2 BƯỚC)
+  // ==========================================
+  if (mode === 'forgot_password') {
+    if (step === 0) {
+      return (
+        <div className="bg-slate-200 min-h-screen flex justify-center items-center font-sans antialiased">
+          <div className="w-[375px] h-[812px] rounded-[40px] overflow-hidden shadow-2xl relative border-[8px] border-slate-900 bg-gradient-to-br from-blue-700 to-indigo-900 text-white flex flex-col">
+            <div className="p-6 flex justify-between items-center">
+              <div className="text-2xl cursor-pointer" onClick={() => {setMode('login'); setErrorMessage(''); setStep(0);}}>‹</div>
+              <div className="text-sm font-bold">Khôi phục mật khẩu</div>
+              <div className="w-6"></div>
+            </div>
+            <div className="flex-1 px-8 flex flex-col justify-center pb-24">
+              <div className="text-center mb-4 text-5xl">🔐</div>
+              <p className="text-white/80 text-center mb-6 text-xs px-2">Vui lòng nhập số tài khoản ngân hàng và thiết lập mật khẩu mới muốn thay đổi.</p>
+              
+              <div className="w-full mb-4">
+                <input type="text" placeholder="Số tài khoản của bạn" value={forgotInfo.accountNumber} onChange={(e) => setForgotInfo({...forgotInfo, accountNumber: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 px-5 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all" />
+              </div>
+              <div className="w-full mb-5">
+                <input type="password" placeholder="Mật khẩu mới hoàn toàn" value={forgotInfo.newPassword} onChange={(e) => setForgotInfo({...forgotInfo, newPassword: e.target.value})} className="w-full bg-white/15 border border-white/30 py-4 px-5 rounded-2xl text-white placeholder-white/60 text-sm backdrop-blur-md outline-none focus:border-blue-400 transition-all" />
+              </div>
 
-          {errorMessage && <p className="text-red-200 text-xs font-semibold mb-3">{errorMessage}</p>}
-          
-          <button onClick={handleForgotPasswordSubmit} disabled={isLoading} className="w-full py-4 bg-white text-blue-700 font-bold rounded-2xl shadow-lg hover:bg-slate-50 transition-all text-sm">
-            {isLoading ? 'ĐANG XỬ LÝ...' : 'ĐỔI MẬT KHẨU'}
-          </button>
+              {errorMessage && <p className="text-red-200 text-xs font-semibold mb-3">{errorMessage}</p>}
+              
+              <button 
+                onClick={() => {
+                  if (!forgotInfo.accountNumber || !forgotInfo.newPassword) {
+                    setErrorMessage('❌ Vui lòng nhập Số tài khoản và Mật khẩu mới!');
+                  } else {
+                    setErrorMessage('');
+                    setStep(1); 
+                  }
+                }} 
+                className="w-full py-4 bg-white text-blue-700 font-bold rounded-2xl shadow-lg hover:bg-slate-50 transition-all text-sm">
+                TIẾP TỤC QUÉT MẶT
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  );
+      );
+    }
+
+    if (step === 1) {
+      return (
+        <div className="bg-slate-200 min-h-screen flex justify-center items-center font-sans antialiased">
+          <div className="w-[375px] h-[812px] rounded-[40px] overflow-hidden shadow-2xl relative border-[8px] border-slate-900 flex flex-col">
+            <FaceAuthCamera 
+              title="Xác thực khuôn mặt" 
+              desc={`Đang xác thực chủ tài khoản ${forgotInfo.accountNumber} để đổi mật khẩu`}
+              btnText="XÁC NHẬN ĐỔI MẬT KHẨU"
+              loadText="ĐANG SO KHỚP..."
+              onConfirm={handleForgotPasswordSubmit}
+              onBack={() => setStep(0)}
+            />
+          </div>
+        </div>
+      );
+    }
+  }
 
   // KHU VỰC CÁC MÀN HÌNH SAU ĐĂNG NHẬP
   return (
@@ -432,7 +532,7 @@ export default function App() {
                 <div className="absolute bottom-4 right-5 text-sm font-black tracking-wider text-amber-400">VISA</div>
               </div>
               
-              {/* Grid 6 nút tính năng (Đã cập nhật mới) */}
+              {/* Grid 6 nút tính năng */}
               <div className="grid grid-cols-2 gap-4">
                 {/* Nút 1: Chuyển tiền */}
                 <button 
@@ -456,8 +556,17 @@ export default function App() {
                   <span className="text-xs font-semibold text-slate-700 text-center">Cập nhật mặt</span>
                 </button>
 
-                {/* Nút 3: Nạp tiền điện thoại */}
-                <button className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer">
+                {/* CẬP NHẬT: Nút 3 - Kích hoạt chức năng Nạp tiền điện thoại */}
+                <button 
+                  onClick={() => {
+                    setMode('topup'); 
+                    setStep(0); 
+                    setErrorMessage('');
+                    // Gọi số điện thoại mặc định của người dùng
+                    setTopupInfo({ phoneNumber: currentUser?.phoneNumber || '', amount: '50000' });
+                  }}
+                  className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer"
+                >
                   <div className="w-10 h-10 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mb-2">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" /></svg>
                   </div>
@@ -493,7 +602,7 @@ export default function App() {
           </div>
         )}
 
-        {/* CHỨC NĂNG: MỞ TÀI KHOẢN (REGISTER) */}
+        {/* CHỨC NĂNG: MỞ TÀI KHOẢN (REGISTER) - ĐÃ THÊM Ô SỐ ĐIỆN THOẠI */}
         {mode === 'register' && (
           <div className="h-full flex flex-col bg-white">
             {step === 0 ? (
@@ -504,6 +613,13 @@ export default function App() {
                     <label className="block text-xs font-bold text-slate-500 mb-2">HỌ VÀ TÊN</label>
                     <input value={registerInfo.fullname} onChange={(e)=>setRegisterInfo({...registerInfo, fullname: e.target.value.toUpperCase()})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500 font-semibold" placeholder="NGUYEN VAN A" />
                   </div>
+                  
+                  {/* CẬP NHẬT: Thêm trường nhập số điện thoại */}
+                  <div className="mb-4">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">SỐ ĐIỆN THOẠI</label>
+                    <input type="tel" value={registerInfo.phoneNumber} onChange={(e)=>setRegisterInfo({...registerInfo, phoneNumber: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500" placeholder="09xx xxx xxx" />
+                  </div>
+
                   <div className="mb-4">
                     <label className="block text-xs font-bold text-slate-500 mb-2">SỐ TÀI KHOẢN MONG MUỐN</label>
                     <input type="number" value={registerInfo.accountNumber} onChange={(e)=>setRegisterInfo({...registerInfo, accountNumber: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500" placeholder="Nhập số tài khoản tự chọn" />
@@ -513,13 +629,95 @@ export default function App() {
                     <input type="password" value={registerInfo.password} onChange={(e)=>setRegisterInfo({...registerInfo, password: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500" placeholder="••••••••" />
                   </div>
                   {errorMessage && <p className="text-red-500 text-xs mt-3 font-semibold">{errorMessage}</p>}
-                  <button onClick={() => { if(!registerInfo.fullname || !registerInfo.accountNumber || !registerInfo.password) return alert("Vui lòng điền đầy đủ 3 ô thông tin!"); setStep(1); setErrorMessage(''); }} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm mt-2">
+                  <button onClick={() => { if(!registerInfo.fullname || !registerInfo.phoneNumber || !registerInfo.accountNumber || !registerInfo.password) return alert("Vui lòng điền đầy đủ 4 ô thông tin!"); setStep(1); setErrorMessage(''); }} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm mt-2">
                     TIẾP TỤC QUÉT MẶT
                   </button>
                 </div>
               </>
             ) : (
               <FaceAuthCamera title="CHỤP FACE ID ĐĂNG KÝ" desc="Quét gương mặt để thiết lập bảo mật sinh trắc học sinh viên." btnText="HOÀN TẤT TẠO TÀI KHOẢN" onConfirm={handleRegisterSubmit} loadText="ĐANG KHỞI TẠO..." onBack={() => setStep(0)} />
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* THÊM MỚI: LUỒNG NẠP TIỀN ĐIỆN THOẠI (TOPUP) */}
+        {/* ========================================================= */}
+        {mode === 'topup' && (
+          <div className="h-full flex flex-col bg-white">
+            {/* STEP 0: Chọn thông tin nạp */}
+            {step === 0 && (
+              <>
+                <AppHeader title="NẠP TIỀN ĐIỆN THOẠI" onBack={() => setMode('home')} />
+                <div className="p-6 flex-1 overflow-y-auto">
+                  <div className="mb-4">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">SỐ ĐIỆN THOẠI NẠP</label>
+                    <input 
+                      type="tel" 
+                      value={topupInfo.phoneNumber} 
+                      onChange={(e) => setTopupInfo({...topupInfo, phoneNumber: e.target.value})} 
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-lg outline-none focus:border-blue-500 font-bold text-slate-700 tracking-wide" 
+                      placeholder="Nhập số điện thoại" 
+                    />
+                  </div>
+                  <div className="mb-5">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">CHỌN MỆNH GIÁ</label>
+                    <select 
+                      value={topupInfo.amount} 
+                      onChange={(e) => setTopupInfo({...topupInfo, amount: e.target.value})} 
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-lg text-blue-700 font-bold outline-none focus:border-blue-500 appearance-none"
+                    >
+                      <option value="10000">10,000 VND</option>
+                      <option value="20000">20,000 VND</option>
+                      <option value="50000">50,000 VND</option>
+                      <option value="100000">100,000 VND</option>
+                      <option value="200000">200,000 VND</option>
+                      <option value="500000">500,000 VND</option>
+                    </select>
+                  </div>
+                  
+                  {errorMessage && <p className="text-red-500 text-xs font-semibold mb-4">{errorMessage}</p>}
+                  
+                  <button onClick={() => { 
+                    if (!topupInfo.phoneNumber || !topupInfo.amount) return alert("Vui lòng điền đủ số điện thoại và mệnh giá!"); 
+                    if (parseInt(topupInfo.amount) > currentUser.balance) return alert("Số dư tài khoản khả dụng của bạn không đủ!");
+                    setStep(1); setErrorMessage(''); 
+                  }} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm mt-4">
+                    TIẾP TỤC XÁC THỰC
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* STEP 1: XÁC THỰC FACE ID NẠP TIỀN */}
+            {step === 1 && (
+              <FaceAuthCamera 
+                title="XÁC THỰC NẠP TIỀN" 
+                desc="Ký số giao dịch bằng khuôn mặt sinh trắc học để nạp thẻ." 
+                btnText="XÁC NHẬN NẠP" 
+                onConfirm={handleTopupFaceAuth} 
+                loadText="ĐANG XỬ LÝ..." 
+                onBack={() => setStep(0)} 
+              />
+            )}
+
+            {/* STEP 2: THÀNH CÔNG */}
+            {step === 2 && (
+              <>
+                <AppHeader title="KẾT QUẢ GIAO DỊCH" onBack={() => {setMode('home'); setStep(0);}} />
+                <div className="p-8 text-center flex-1 flex flex-col justify-center">
+                  <div className="w-20 h-20 bg-emerald-500 text-white rounded-full flex items-center justify-center text-4xl mx-auto mb-4 shadow-lg shadow-emerald-500/30">
+                    ✓
+                  </div>
+                  <h2 className="text-emerald-500 font-bold text-xl mb-1">NẠP THÀNH CÔNG</h2>
+                  <p className="text-slate-400 text-xs mb-6">{new Date().toLocaleString('vi-VN')}</p>
+                  <h1 className="text-3xl font-black text-slate-800 mb-2">{Number(topupInfo.amount).toLocaleString()} VND</h1>
+                  <p className="text-xs font-semibold text-slate-500 mb-10">Tới SĐT: <span className="text-slate-800 font-bold">{topupInfo.phoneNumber}</span></p>
+                  <button onClick={() => {setMode('home'); setStep(0);}} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm">
+                    QUAY VỀ TRANG CHỦ
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -569,10 +767,10 @@ export default function App() {
               </>
             )}
             
-            {/* STEP 1: BẬT CAMERA QUÈT CHÂN DUNG XÁC THỰC CHỦ TÀI KHOẢN NGƯỜI GỬI */}
-            {step === 1 && <FaceAuthCamera title="QUÉT FACE ID CHUYỂN TIỀN" desc="Nhìn thẳng vào ống kính để ký số giao dịch bằng khuôn mặt sinh trắc học." btnText="XÁC THỰC GIAO DỊCH" onConfirm={handleTransferFaceAuth} loadText="AI ĐANG KIỂM TRA MẶT CHỦ THẺ..." onBack={() => setStep(0)} />}
+            {/* STEP 1: BẬT CAMERA QUÉT CHÂN DUNG */}
+            {step === 1 && <FaceAuthCamera title="QUÉT FACE ID CHUYỂN TIỀN" desc="Nhìn thẳng vào ống kính để ký số giao dịch bằng khuôn mặt sinh trắc học." btnText="XÁC THỰC GIAO DỊCH" onConfirm={handleTransferFaceAuth} loadText="AI ĐANG KIỂM TRA MẶT..." onBack={() => setStep(0)} />}
             
-            {/* STEP 2: HOÀN TẤT GIAO DỊCH CHUYỂN TIỀN */}
+            {/* STEP 2: HOÀN TẤT */}
             {step === 2 && (
               <>
                 <AppHeader title="TRẠNG THÁI GIAO DỊCH" onBack={() => {setMode('home'); setStep(0);}} />
@@ -609,8 +807,8 @@ export default function App() {
                 historyList.map((tx, idx) => (
                   <div key={idx} className="bg-white mb-3 p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center">
                     <div className="text-left">
-                      <span className="block font-bold text-sm text-slate-800">{tx.recipient_name || tx.recipientName}</span>
-                      <span className="text-[11px] text-slate-400">{tx.time || 'Chuyển khoản 24/7'}</span>
+                      <span className="block font-bold text-sm text-slate-800">{tx.recipient_name || tx.recipientName || tx.phone_number}</span>
+                      <span className="text-[11px] text-slate-400">{tx.time || (tx.phone_number ? 'Nạp tiền điện thoại' : 'Chuyển khoản 24/7')}</span>
                     </div>
                     <span className="text-red-500 font-extrabold text-sm">-{Number(tx.amount).toLocaleString()}đ</span>
                   </div>
@@ -621,7 +819,7 @@ export default function App() {
         )}
 
         {/* ========================================================= */}
-        {/* THÊM 1: MÀN HÌNH QUÉT MÃ QR NẰM Ở ĐÂY */}
+        {/* MÀN HÌNH QUÉT MÃ QR */}
         {mode === 'qr' && (
           <QRScanner 
             setMode={setMode} 
@@ -629,8 +827,8 @@ export default function App() {
             currentUser={currentUser} 
           />
         )}
-        {/* ========================================================= */}
-        {/* THÊM 3: MÀN HÌNH CÁ NHÂN (PROFILE) NẰM Ở ĐÂY LÀ CHUẨN BÀI */}
+        
+        {/* MÀN HÌNH CÁ NHÂN (PROFILE) */}
         {mode === 'profile' && (
           <Profile 
             userName={currentUser?.fullname || "NGƯỜI DÙNG VNU"} 
@@ -639,8 +837,8 @@ export default function App() {
           />
         )}
 
-        {/* THÊM 2: THANH MENU BOTTOM NAV ĐẶT Ở ĐÂY LÀ CHUẨN NHẤT */}
-        {(mode === 'home' || mode === 'qr' || mode === 'history' || mode === 'profile' || (mode === 'transfer' && step === 0)) && (
+        {/* CẬP NHẬT: THANH MENU BOTTOM NAV (Hiển thị thêm khi topup ở bước 0) */}
+        {(mode === 'home' || mode === 'qr' || mode === 'history' || mode === 'profile' || (mode === 'transfer' && step === 0) || (mode === 'topup' && step === 0)) && (
           <BottomNav 
             mode={mode} 
             setMode={setMode} 

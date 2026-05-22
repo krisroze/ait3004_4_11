@@ -24,7 +24,7 @@ def verify_face(image_data: str):
             temp_file.write(image_bytes)
             temp_path = temp_file.name
 
-        # search trong database reference
+        # search trong database reference (So khớp 1:N)
         result = DeepFace.find(
             img_path=temp_path,
             db_path=REFERENCE_FOLDER,
@@ -56,3 +56,51 @@ def verify_face(image_data: str):
     except Exception as e:
         print("Face recognition error:", e)
         return None
+
+
+def verify_face_by_account(image_data: str, account_number: str):
+    """
+    Hàm này dùng cho Đăng nhập và Quên mật khẩu. 
+    So sánh trực tiếp ảnh chụp với ảnh tham chiếu của riêng tài khoản đó (So khớp 1:1).
+    """
+    try:
+        if "," in image_data:
+            image_data = image_data.split(",")[1]
+
+        image_bytes = base64.b64decode(image_data)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
+
+        # Tạo đường dẫn tới file ảnh gốc của người dùng này (VD: reference_faces/23072006.jpg)
+        reference_path = os.path.join(REFERENCE_FOLDER, f"{account_number}.jpg")
+        
+        # Nếu không tìm thấy file ảnh gốc trong hệ thống -> Từ chối luôn
+        if not os.path.exists(reference_path):
+            os.remove(temp_path)
+            print(f"[Error] Không tìm thấy ảnh gốc của tài khoản {account_number}")
+            return False
+
+        # So sánh 1:1 bằng DeepFace.verify
+        result = DeepFace.verify(
+            img1_path=temp_path,
+            img2_path=reference_path,
+            model_name="VGG-Face",
+            enforce_detection=False
+        )
+        
+        os.remove(temp_path)
+
+        distance = result.get("distance", 1.0)
+        
+        # Áp dụng chốt chặn bảo mật
+        if distance > MATCH_THRESHOLD:
+            print(f"[AI Alert] Cảnh báo người lạ xâm nhập! Khoảng cách {distance} vượt ngưỡng {MATCH_THRESHOLD}")
+            return False
+
+        return result.get("verified", False)
+
+    except Exception as e:
+        print("Lỗi so khớp tài khoản:", e)
+        return False
