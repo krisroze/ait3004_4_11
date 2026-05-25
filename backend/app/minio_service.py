@@ -5,7 +5,7 @@ from minio import Minio
 
 # 1. Khởi tạo MinIO (Đã đổi thành 127.0.0.1 để trị lỗi Windows lú)
 client = Minio(
-    "localhost:9000",
+    "minio:9000",
     access_key="minio_admin",
     secret_key="minio_password",
     secure=False
@@ -43,4 +43,4 @@ def upload_base64_image(image_data: str) -> str:
     )
 
     # Trả về URL (Cũng đổi thành 127.0.0.1 luôn cho đồng bộ)
-    return f"http://localhost:9000/{BUCKET_NAME}/{filename}"
+    return f"http://minio:9000/{BUCKET_NAME}/{filename}"

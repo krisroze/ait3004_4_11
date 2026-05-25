@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Giữ nguyên đường dẫn kết nối MySQL của bạn
-DATABASE_URL = "mysql+pymysql://bank_user:bank_password@localhost:3306/bank_system"
+DATABASE_URL = "mysql+pymysql://bank_user:bank_password@mysql_db:3306/bank_system"
 
 engine = create_engine(DATABASE_URL)
 

@@ -4,8 +4,9 @@ import axios from 'axios';
 import BottomNav from './BottomNav';
 import QRScanner from './QRScanner';
 import Profile from './Profile';
-// IMPORT LOGO MỚI CỦA BẠN
 import vnuShieldLogo from './vnu_shield_logo.png'; 
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8085';
 
 export default function App() {
   const webcamRef = useRef(null);
@@ -31,7 +32,7 @@ export default function App() {
   // Lấy lịch sử giao dịch khi vào màn hình lịch sử
   const fetchTransactionHistory = async () => {
     try {
-      const response = await axios.get('http://127.0.0.1:8000/api/history');
+      const response = await axios.get(`${API_BASE_URL}/api/history`);
       setHistoryList(response.data);
     } catch (error) {
       console.error("Lỗi lấy lịch sử:", error);
@@ -69,7 +70,7 @@ export default function App() {
     }
     setErrorMessage(''); setIsLoading(true);
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/login', {
+      const response = await axios.post(`${API_BASE_URL}/api/login`, {
         account_number: accountToLogin,
         password: loginInfo.password
       });
@@ -105,7 +106,7 @@ export default function App() {
     }
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/login-face', {
+      const response = await axios.post(`${API_BASE_URL}/api/login-face`, {
         account_number: rememberedUser.accountNumber,
         image_data: imageBase64
       });
@@ -139,7 +140,7 @@ export default function App() {
 
     setErrorMessage(''); setIsLoading(true);
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/reset-password', {
+      const response = await axios.post(`${API_BASE_URL}/api/reset-password`, {
         account_number: forgotInfo.accountNumber,
         new_password: forgotInfo.newPassword,
         image_data: imageBase64
@@ -173,7 +174,7 @@ export default function App() {
     }
     try {
       // CẬP NHẬT: Gửi thêm phone_number lên API đăng ký mới
-      const response = await axios.post('http://127.0.0.1:8000/api/register', { 
+      const response = await axios.post(`${API_BASE_URL}/api/register`, { 
         fullname: registerInfo.fullname, 
         phone_number: registerInfo.phoneNumber,
         account_number: registerInfo.accountNumber, 
@@ -211,7 +212,7 @@ export default function App() {
     setErrorMessage('');
     setIsLoading(true);
     try {
-      const response = await axios.get(`http://127.0.0.1:8000/api/check-recipient/${transactionInfo.accountNumber}`);
+      const response = await axios.get(`${API_BASE_URL}/api/check-recipient/${transactionInfo.accountNumber}`);
       if (response.status === 200) {
         setTransactionInfo({
           ...transactionInfo,
@@ -240,7 +241,7 @@ export default function App() {
     }
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/execute-transfer', { 
+      const response = await axios.post(`${API_BASE_URL}/api/execute-transfer`, { 
         sender_account_number: currentUser.accountNumber,
         recipient_account_number: transactionInfo.accountNumber,
         amount: parseFloat(transactionInfo.amount),
@@ -276,7 +277,7 @@ export default function App() {
     }
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/topup', {
+      const response = await axios.post(`${API_BASE_URL}/api/topup`, {
         account_number: currentUser.accountNumber,
         phone_number: topupInfo.phoneNumber,
         amount: parseInt(topupInfo.amount),
@@ -299,7 +300,7 @@ export default function App() {
     setErrorMessage(''); setIsLoading(true);
     const imageBase64 = webcamRef.current?.getScreenshot();
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/update-face', { 
+      const response = await axios.post(`${API_BASE_URL}/api/update-face`, { 
         account_number: currentUser.accountNumber, 
         image_data: imageBase64 
       });
@@ -368,7 +369,7 @@ export default function App() {
       <div className="w-[375px] h-[812px] rounded-[40px] overflow-hidden shadow-2xl relative border-[8px] border-slate-900 bg-gradient-to-br from-blue-700 to-indigo-900 text-white flex flex-col">
         <div className="p-6 flex justify-between items-center text-sm font-semibold z-10">
           <div>VNU Bank</div>
-          <div className="opacity-80">🇲🇳 VN | 🇬🇧 EN</div>
+          <div className="opacity-80">VN | EN</div>
         </div>
 
         <div className="flex-1 px-8 flex flex-col justify-center pb-16">

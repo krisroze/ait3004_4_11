@@ -1,14 +1,15 @@
-# General
-.DS_Store
+node_modules/
+__pycache__/
+*.pyc
+
+mysql_data/
+qdrant_data/
+minio_data/
+
 .env
+.venv
+env/
+venv/
 
-# Backend
-backend/__pycache__/
-backend/.pytest_cache/
-backend/venv/
-
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.cache/
-frontend/package-lock.json (optional, but node_modules is mandatory to ignore)
+.DS_Store
+Thumbs.db

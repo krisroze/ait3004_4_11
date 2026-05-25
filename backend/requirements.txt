@@ -9,3 +9,4 @@ pydantic
 sqlalchemy
 pymysql
 cryptography
+tf-keras

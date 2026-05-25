@@ -23,6 +23,55 @@ from app.minio_service import upload_base64_image  # Service đẩy ảnh giao d
 # Tự động tạo TẤT CẢ các bảng mới trống trơn nếu chưa có
 Base.metadata.create_all(bind=engine)
 
+def seed_demo_accounts():
+    # Khởi tạo session biệt lập bằng cách gọi SessionLocal trực tiếp hoặc qua engine
+    from sqlalchemy.orm import sessionmaker
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    
+    try:
+        demo_accounts = [
+            {
+                "account_number": "19032006",
+                "phone_number": "0912345678",
+                "password": "password123",
+                "fullname": "Nguyen Van A (Demo)",
+                "balance": 5000000
+            },
+            {
+                "account_number": "24072006",
+                "phone_number": "0988888888",
+                "password": "password123",
+                "fullname": "Tran Thi B (Demo)",
+                "balance": 12500000
+            }
+        ]
+
+        print("🚀 [DevOps Seeding] Đang kiểm tra tài khoản mẫu...")
+        for acc in demo_accounts:
+            exists = db.query(User).filter(User.account_number == acc["account_number"]).first()
+            if not exists:
+                new_user = User(
+                    account_number=acc["account_number"],
+                    phone_number=acc["phone_number"],
+                    password=acc["password"],
+                    fullname=acc["fullname"],
+                    balance=acc["balance"]
+                )
+                db.add(new_user)
+                print(f" -> Đang nạp tài khoản: {acc['account_number']}")
+        
+        db.commit() # Ép buộc lưu xuống Database
+        print("✅ [DevOps Seeding] Hoàn tất nạp dữ liệu mẫu!")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Lỗi Seeding: {e}")
+    finally:
+        db.close() # BẮT BUỘC ĐÓNG SESSION ĐỂ MYSQL KHÔNG BỊ TREO LOG
+
+# Chạy hàm khởi tạo dữ liệu mẫu ngay khi backend bật lên
+seed_demo_accounts()
+
 app = FastAPI()
 
 # Cấu hình CORS cho phép Frontend gọi API
