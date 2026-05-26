@@ -10,3 +10,5 @@ sqlalchemy
 pymysql
 cryptography
 tf-keras
+celery
+redis

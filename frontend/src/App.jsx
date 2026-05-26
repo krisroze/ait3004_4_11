@@ -6,7 +6,7 @@ import QRScanner from './QRScanner';
 import Profile from './Profile';
 import vnuShieldLogo from './vnu_shield_logo.png'; 
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8085';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export default function App() {
   const webcamRef = useRef(null);
