@@ -25,6 +25,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
+Instrumentator().instrument(app).expose(app)
+
 # Cấu hình CORS cho phép Frontend gọi API
 app.add_middleware(
     CORSMiddleware,

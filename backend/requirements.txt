@@ -12,3 +12,4 @@ cryptography
 tf-keras
 celery
 redis
+prometheus-fastapi-instrumentator
