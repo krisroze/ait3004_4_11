@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float
+from sqlalchemy import Column, Integer, String, DateTime, Text, Float, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -36,6 +36,7 @@ class User(Base):
     
     bank_name = Column(String(50), nullable=False)          # Ngân hàng (VD: BIDV)
     password = Column(String(255), nullable=False)          # Mật khẩu
+    is_admin = Column(Boolean, default=False)
     balance = Column(Float, default=500000.0)               # Số dư (Tặng sẵn 500k để test)
     face_id = Column(String(255), nullable=True)            # Tên file ảnh/ID khuôn mặt
     created_at = Column(DateTime(timezone=True), server_default=func.now())
