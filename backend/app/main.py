@@ -383,6 +383,7 @@ def execute_transfer(request: TransferExecutionRequest, db: Session = Depends(ge
 
     except Exception as e:
         db.rollback()
+        print(f"[Execute Transfer DB Error] {repr(e)}")
         raise HTTPException(status_code=500, detail="Giao dịch thất bại do lỗi hệ thống cơ sở dữ liệu.")
     
 from celery.result import AsyncResult
