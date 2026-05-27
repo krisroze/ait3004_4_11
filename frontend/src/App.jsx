@@ -57,6 +57,26 @@ export default function App() {
   // THÊM MỚI: State quản lý form nạp tiền điện thoại
   const [topupInfo, setTopupInfo] = useState({ phoneNumber: '', amount: '50000' }); // Mặc định chọn gói 50k
 
+// THÊM MỚI: State và Logic định giá Tài khoản số đẹp
+  const [beautifulAccInfo, setBeautifulAccInfo] = useState({ newAccount: '', price: 0 });
+
+  // THÊM MỚI: State cho Thanh toán Hóa đơn
+  const [billInfo, setBillInfo] = useState({ provider: 'Điện lực EVN', customerCode: '', amount: 0 });
+  const [isBillFetched, setIsBillFetched] = useState(false); // Trạng thái đã tra cứu ra tiền hay chưa
+
+// THÊM MỚI: State quản lý Khóa/Mở thẻ VISA
+  const [isCardLocked, setIsCardLocked] = useState(false);
+  const [targetCardAction, setTargetCardAction] = useState(null);
+
+  // Hàm tự động tính giá tiền dựa theo độ VIP của số
+  const calculateAccountPrice = (accStr) => {
+    if (!accStr) return 0;
+    if (accStr.length <= 4) return 500000; // Số siêu ngắn
+    if (/(\d)\1{3,}/.test(accStr)) return 200000; // Tứ quý, ngũ quý (vd: 8888)
+    if (accStr.includes('68') || accStr.includes('86') || accStr.includes('99')) return 100000; // Số lộc phát
+    return 50000; // Số bình thường tự chọn
+  };
+
   // ==========================================
   // LOGIC XỬ LÝ CHỨC NĂNG TÍCH HỢP BACKEND
   // ==========================================
@@ -290,6 +310,104 @@ export default function App() {
       }
     } catch (error) {
       setErrorMessage('❌ ' + (error.response?.data?.detail || 'Giao dịch nạp tiền thất bại!'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // THÊM MỚI: Xử lý Xác thực mua Tài khoản số đẹp
+  const handleBuyBeautifulAccountAuth = async () => {
+    if (!currentUser || !beautifulAccInfo.newAccount) return;
+    
+    setErrorMessage(''); setIsLoading(true);
+    const imageBase64 = webcamRef.current?.getScreenshot();
+    if (!imageBase64) {
+      setErrorMessage('❌ Lỗi Camera! Không thể chụp ảnh xác thực.');
+      setIsLoading(false); return;
+    }
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/buy-beautiful-account`, {
+        old_account_number: currentUser.accountNumber,
+        new_account_number: beautifulAccInfo.newAccount,
+        amount: beautifulAccInfo.price,
+        image_data: imageBase64
+      });
+
+      if (response.data.status === 'success') {
+        // Cập nhật lại thông tin user ở máy khách
+        const updatedUser = { 
+          ...currentUser, 
+          balance: response.data.new_balance,
+          accountNumber: response.data.new_account 
+        };
+        setCurrentUser(updatedUser);
+        localStorage.setItem('vnu_remembered_user', JSON.stringify(updatedUser));
+        setRememberedUser(updatedUser);
+        setStep(2); 
+      }
+    } catch (error) {
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Giao dịch thất bại!'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // THÊM MỚI: Xác thực khuôn mặt để Thanh toán Hóa đơn
+  const handleBillPaymentAuth = async () => {
+    if (!currentUser) return;
+    setErrorMessage(''); setIsLoading(true);
+    
+    const imageBase64 = webcamRef.current?.getScreenshot();
+    if (!imageBase64) {
+      setErrorMessage('❌ Lỗi Camera!');
+      setIsLoading(false); return;
+    }
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/pay-bill`, {
+        account_number: currentUser.accountNumber,
+        bill_provider: billInfo.provider,
+        customer_code: billInfo.customerCode,
+        amount: billInfo.amount,
+        image_data: imageBase64
+      });
+
+      if (response.data.status === 'success') {
+        const updatedUser = { ...currentUser, balance: response.data.new_balance };
+        setCurrentUser(updatedUser);
+        localStorage.setItem('vnu_remembered_user', JSON.stringify(updatedUser));
+        setRememberedUser(updatedUser);
+        setStep(2); 
+      }
+    } catch (error) {
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Thanh toán thất bại!'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // THÊM MỚI: Xác thực khuôn mặt để Khóa/Mở thẻ
+  const handleCardToggleAuth = async () => {
+    setErrorMessage(''); setIsLoading(true);
+    const imageBase64 = webcamRef.current?.getScreenshot();
+    if (!imageBase64) {
+      setErrorMessage('❌ Lỗi Camera!');
+      setIsLoading(false); return;
+    }
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/login-face`, {
+        account_number: currentUser.accountNumber,
+        image_data: imageBase64
+      });
+
+      if (response.status === 200) {
+        setIsCardLocked(targetCardAction === 'lock');
+        setStep(2); 
+      }
+    } catch (error) {
+      setErrorMessage('❌ ' + (error.response?.data?.detail || 'Khuôn mặt không khớp! Từ chối thao tác.'));
     } finally {
       setIsLoading(false);
     }
@@ -574,16 +692,33 @@ export default function App() {
                   <span className="text-xs font-semibold text-slate-700 text-center">Nạp tiền ĐT</span>
                 </button>
 
-                {/* Nút 4: Tiết kiệm */}
-                <button className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer">
-                  <div className="w-10 h-10 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mb-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                {/* Nút 4: Thanh toán Hóa đơn (Thay cho Tiết kiệm) */}
+                <button 
+                  onClick={() => {
+                    setMode('bill_payment'); 
+                    setStep(0); 
+                    setErrorMessage('');
+                    setBillInfo({ provider: 'Điện lực EVN', customerCode: '', amount: 0 });
+                    setIsBillFetched(false);
+                  }}
+                  className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer"
+                >
+                  <div className="w-10 h-10 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mb-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
                   </div>
-                  <span className="text-xs font-semibold text-slate-700 text-center">Tiết kiệm</span>
+                  <span className="text-xs font-semibold text-slate-700 text-center">Thanh toán HĐ</span>
                 </button>
 
                 {/* Nút 5: Mở tài khoản số đẹp */}
-                <button className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 relative cursor-pointer">
+                <button 
+                  onClick={() => {
+                    setMode('beautiful_account'); 
+                    setStep(0); 
+                    setErrorMessage('');
+                    setBeautifulAccInfo({ newAccount: '', price: 0 });
+                  }}
+                  className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 relative cursor-pointer"
+                >
                   <span className="absolute top-2 right-2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">HOT</span>
                   <div className="w-10 h-10 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-2">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
@@ -591,12 +726,19 @@ export default function App() {
                   <span className="text-xs font-semibold text-slate-700 text-center leading-tight">TK số đẹp</span>
                 </button>
 
-                {/* Nút 6: Đầu tư tự động */}
-                <button className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" /></svg>
+                {/* Nút 6: Quản lý Thẻ (Thay cho Đầu tư tự động) */}
+                <button 
+                  onClick={() => {
+                    setMode('card_manage'); 
+                    setStep(0); 
+                    setErrorMessage('');
+                  }}
+                  className="flex flex-col items-center justify-center bg-white p-4 rounded-2xl shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-50 hover:shadow-md transition-all active:scale-95 cursor-pointer"
+                >
+                  <div className="w-10 h-10 bg-slate-800 text-white rounded-full flex items-center justify-center mb-2 shadow-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
                   </div>
-                  <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Đầu tư<br/>tự động</span>
+                  <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Quản lý thẻ</span>
                 </button>
               </div>
             </div>
@@ -722,6 +864,311 @@ export default function App() {
             )}
           </div>
         )}
+        {/* ========================================================= */}
+        {/* THÊM MỚI: LUỒNG MUA TÀI KHOẢN SỐ ĐẸP */}
+        {/* ========================================================= */}
+        {mode === 'beautiful_account' && (
+          <div className="h-full flex flex-col bg-slate-50">
+            {step === 0 && (
+              <>
+                <AppHeader title="TÀI KHOẢN SỐ ĐẸP" onBack={() => setMode('home')} />
+                <div className="p-6 flex-1 overflow-y-auto">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
+                    <p className="text-xs text-yellow-800 font-semibold leading-relaxed">
+                      Lưu ý: Sau khi đổi, số tài khoản hiện tại (<span className="font-bold">{currentUser?.accountNumber}</span>) sẽ bị vô hiệu hóa.
+                    </p>
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">NHẬP SỐ TÀI KHOẢN MONG MUỐN</label>
+                    <input 
+                      type="number" 
+                      value={beautifulAccInfo.newAccount} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBeautifulAccInfo({ newAccount: val, price: calculateAccountPrice(val) });
+                      }} 
+                      className="w-full p-4 bg-white border border-slate-200 rounded-xl text-xl outline-none focus:border-blue-500 font-bold text-blue-700 tracking-wider shadow-sm" 
+                      placeholder="Ví dụ: 8888, 686868..." 
+                    />
+                  </div>
+                  
+                  {beautifulAccInfo.newAccount && (
+                    <div className="mb-5 bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center animate-pulse">
+                      <span className="text-sm font-bold text-slate-600">Phí phát hành thẻ:</span>
+                      <span className="text-lg font-black text-red-500">{beautifulAccInfo.price.toLocaleString()} VND</span>
+                    </div>
+                  )}
+                  
+                  {errorMessage && <p className="text-red-500 text-xs font-semibold mb-4 text-center">{errorMessage}</p>}
+                  
+                  <button 
+                    onClick={() => { 
+                      if (!beautifulAccInfo.newAccount) return alert("Vui lòng nhập số tài khoản mong muốn!"); 
+                      if (beautifulAccInfo.newAccount === currentUser.accountNumber) return alert("Số này là số bạn đang sử dụng!");
+                      if (beautifulAccInfo.price > currentUser.balance) return alert("Số dư khả dụng không đủ để mua số này!");
+                      setStep(1); setErrorMessage(''); 
+                    }} 
+                    className="w-full py-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-bold rounded-xl shadow-lg text-sm mt-2 transition-all"
+                  >
+                    MUA SỐ NÀY NGAY
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 1 && (
+              <FaceAuthCamera 
+                title="XÁC THỰC THANH TOÁN" 
+                desc={`Ký số giao dịch bằng khuôn mặt để thanh toán ${beautifulAccInfo.price.toLocaleString()}đ`} 
+                btnText="XÁC NHẬN MUA" 
+                onConfirm={handleBuyBeautifulAccountAuth} 
+                loadText="ĐANG ĐỔI SỐ..." 
+                onBack={() => setStep(0)} 
+              />
+            )}
+
+            {step === 2 && (
+              <>
+                <AppHeader title="THÀNH CÔNG" onBack={() => {setMode('home'); setStep(0);}} />
+                <div className="p-8 text-center flex-1 flex flex-col justify-center">
+                  <div className="w-20 h-20 bg-yellow-500 text-white rounded-full flex items-center justify-center text-4xl mx-auto mb-4 shadow-lg shadow-yellow-500/30">
+                    👑
+                  </div>
+                  <h2 className="text-yellow-600 font-bold text-xl mb-1">ĐỔI SỐ THÀNH CÔNG</h2>
+                  <p className="text-slate-500 text-sm mb-6">Số tài khoản mới của bạn là:</p>
+                  <div className="bg-slate-100 py-3 px-6 rounded-2xl inline-block mb-10 border-2 border-dashed border-slate-300">
+                    <h1 className="text-3xl font-black text-blue-700 tracking-widest">{beautifulAccInfo.newAccount}</h1>
+                  </div>
+                  <button onClick={() => {setMode('home'); setStep(0);}} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm">
+                    TRẢI NGHIỆM NGAY
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        
+        {/* ========================================================= */}
+        {/* THÊM MỚI: LUỒNG THANH TOÁN HÓA ĐƠN */}
+        {/* ========================================================= */}
+        {mode === 'bill_payment' && (
+          <div className="h-full flex flex-col bg-slate-50">
+            {step === 0 && (
+              <>
+                <AppHeader title="THANH TOÁN HÓA ĐƠN" onBack={() => setMode('home')} />
+                <div className="p-6 flex-1 overflow-y-auto">
+                  
+                  <div className="mb-4">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">LOẠI DỊCH VỤ</label>
+                    <select 
+                      value={billInfo.provider}
+                      onChange={(e) => { setBillInfo({...billInfo, provider: e.target.value}); setIsBillFetched(false); }}
+                      className="w-full p-4 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500"
+                    >
+                      <option value="Điện lực EVN">⚡ Hóa đơn Tiền Điện (EVN)</option>
+                      <option value="Cấp nước sạch">💧 Hóa đơn Tiền Nước</option>
+                      <option value="Internet VNPT/FPT">🌐 Cước Internet / Truyền hình</option>
+                    </select>
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-xs font-bold text-slate-500 mb-2">MÃ KHÁCH HÀNG</label>
+                    <input 
+                      type="text" 
+                      value={billInfo.customerCode} 
+                      onChange={(e) => { setBillInfo({...billInfo, customerCode: e.target.value.toUpperCase()}); setIsBillFetched(false); }} 
+                      className="w-full p-4 bg-white border border-slate-200 rounded-xl text-lg outline-none focus:border-blue-500 font-bold text-slate-800 uppercase" 
+                      placeholder="VD: PE012345678" 
+                    />
+                  </div>
+                  
+                  {!isBillFetched ? (
+                    <button 
+                      onClick={() => { 
+                        if (!billInfo.customerCode) return alert("Vui lòng nhập Mã khách hàng!");
+                        // Giả lập tra cứu hệ thống: Random ra cục nợ từ 100k -> 500k
+                        const randomAmount = Math.floor(Math.random() * 400000) + 100000;
+                        setBillInfo({...billInfo, amount: randomAmount});
+                        setIsBillFetched(true);
+                        setErrorMessage('');
+                      }} 
+                      className="w-full py-4 bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold rounded-xl shadow-sm text-sm transition-all"
+                    >
+                      TRA CỨU HÓA ĐƠN
+                    </button>
+                  ) : (
+                    <div className="animate-fade-in mt-2">
+                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-6 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
+                        <p className="text-xs text-slate-500 mb-1">Kỳ cước: Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()}</p>
+                        <p className="text-sm font-bold text-slate-800 mb-3">{billInfo.provider} - Khách hàng: {billInfo.customerCode}</p>
+                        <div className="flex justify-between items-end border-t border-slate-100 pt-3">
+                          <span className="text-xs font-bold text-slate-500">Cần thanh toán:</span>
+                          <span className="text-2xl font-black text-red-500">{billInfo.amount.toLocaleString()} đ</span>
+                        </div>
+                      </div>
+
+                      {errorMessage && <p className="text-red-500 text-xs font-semibold mb-4 text-center">{errorMessage}</p>}
+                      
+                      <button 
+                        onClick={() => {
+                          if (billInfo.amount > currentUser.balance) return alert("Số dư khả dụng không đủ để thanh toán!");
+                          setStep(1); setErrorMessage('');
+                        }}
+                        className="w-full py-4 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl shadow-lg text-sm transition-all"
+                      >
+                        THANH TOÁN BẰNG FACE ID
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {step === 1 && (
+              <FaceAuthCamera 
+                title="XÁC THỰC THANH TOÁN" 
+                desc={`Ký số giao dịch thanh toán hóa đơn ${billInfo.amount.toLocaleString()}đ`} 
+                btnText="XÁC NHẬN TRẢ TIỀN" 
+                onConfirm={handleBillPaymentAuth} 
+                loadText="ĐANG THANH TOÁN..." 
+                onBack={() => setStep(0)} 
+              />
+            )}
+
+            {step === 2 && (
+              <>
+                <AppHeader title="BIÊN LAI GIAO DỊCH" onBack={() => {setMode('home'); setStep(0);}} />
+                <div className="p-8 text-center flex-1 flex flex-col justify-center">
+                  <div className="w-20 h-20 bg-teal-500 text-white rounded-full flex items-center justify-center text-4xl mx-auto mb-4 shadow-lg shadow-teal-500/30">
+                    🧾
+                  </div>
+                  <h2 className="text-teal-600 font-bold text-xl mb-1">GẠCH NỢ THÀNH CÔNG</h2>
+                  <p className="text-slate-400 text-xs mb-6">{new Date().toLocaleString('vi-VN')}</p>
+                  <h1 className="text-3xl font-black text-slate-800 mb-2">{billInfo.amount.toLocaleString()} VND</h1>
+                  <p className="text-xs font-semibold text-slate-500 mb-10">Dịch vụ: <span className="text-slate-800 font-bold">{billInfo.provider}</span></p>
+                  <button onClick={() => {setMode('home'); setStep(0);}} className="w-full py-4 bg-blue-700 text-white font-bold rounded-xl shadow-md text-sm">
+                    QUAY VỀ TRANG CHỦ
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* THÊM MỚI: LUỒNG QUẢN LÝ THẺ VISA */}
+        {/* ========================================================= */}
+        {mode === 'card_manage' && (
+          <div className="h-full flex flex-col bg-slate-50">
+            {step === 0 && (
+              <>
+                <AppHeader title="QUẢN LÝ THẺ" onBack={() => setMode('home')} />
+                <div className="p-6 flex-1 overflow-y-auto">
+                  
+                  {/* GIAO DIỆN CHIẾC THẺ VISA */}
+                  <div className={`relative h-[220px] rounded-2xl p-6 text-white shadow-2xl transition-all duration-700 mb-8 overflow-hidden ${isCardLocked ? 'bg-gradient-to-br from-slate-600 to-slate-800 scale-95 opacity-90' : 'bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-900 scale-100'}`}>
+                    <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+                    <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-black/20 rounded-full blur-2xl"></div>
+                    
+                    <div className="relative z-10 flex flex-col h-full justify-between">
+                      <div className="flex justify-between items-start">
+                        <div className="flex flex-col gap-2">
+                          <svg className="w-10 h-8 text-yellow-300 opacity-90" viewBox="0 0 40 32" fill="currentColor">
+                            <rect width="40" height="32" rx="6" fill="#FCD34D"/>
+                            <path d="M0 10h12v12H0V10zm28 0h12v12H28V10zm-14 0h12v12H14V10z" fill="#D97706" opacity="0.4"/>
+                            <path d="M10 0v32M30 0v32M0 16h40" stroke="#D97706" strokeWidth="1.5" opacity="0.4"/>
+                          </svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 text-white/80 transform rotate-90">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.106-.53-.106a.75.75 0 01.106-1.492h.848a.75.75 0 01.106 1.492z" />
+                          </svg>
+                        </div>
+                        <span className="font-black italic text-2xl tracking-wider select-none drop-shadow-md">VISA</span>
+                      </div>
+
+                      <div>
+                        <p className="font-mono text-xl tracking-[0.25em] mb-2 drop-shadow-md opacity-90">
+                          4200 1234 {currentUser?.accountNumber.substring(0, 4) || '5678'} 9012
+                        </p>
+                        <div className="flex justify-between items-end">
+                          <div>
+                            <p className="text-[9px] uppercase tracking-widest opacity-60 mb-1">Card Holder</p>
+                            <p className="font-bold tracking-widest uppercase text-sm drop-shadow-md">{currentUser?.fullname}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[9px] uppercase tracking-widest opacity-60 mb-1">Expires</p>
+                            <p className="font-bold tracking-widest text-sm drop-shadow-md">12/28</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {isCardLocked && (
+                      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center z-20">
+                        <div className="bg-red-500 text-white text-xs font-black px-4 py-1.5 rounded-full uppercase tracking-widest border border-red-400 shadow-lg flex items-center gap-2">
+                          <span>🔒</span> ĐÃ KHÓA THẺ
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* KHU VỰC ĐIỀU KHIỂN */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm mb-1">Trạng thái thẻ</h3>
+                      <p className="text-xs text-slate-500">Khóa thẻ nếu nghi ngờ lộ thông tin</p>
+                    </div>
+
+                    <button 
+                      onClick={() => {
+                        const action = isCardLocked ? 'unlock' : 'lock';
+                        setTargetCardAction(action);
+                        setStep(1); 
+                      }}
+                      className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-300 focus:outline-none ${isCardLocked ? 'bg-slate-300' : 'bg-emerald-500'}`}
+                    >
+                      <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform duration-300 shadow-md ${isCardLocked ? 'translate-x-1' : 'translate-x-7'}`} />
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {step === 1 && (
+              <FaceAuthCamera 
+                title="BẢO MẬT THẺ" 
+                desc={`Vui lòng xác thực khuôn mặt để ${targetCardAction === 'lock' ? 'KHÓA' : 'MỞ'} thẻ VISA`} 
+                btnText="XÁC NHẬN" 
+                onConfirm={handleCardToggleAuth} 
+                loadText="ĐANG KIỂM TRA..." 
+                onBack={() => setStep(0)} 
+              />
+            )}
+
+            {step === 2 && (
+              <>
+                <AppHeader title="THÀNH CÔNG" onBack={() => {setMode('card_manage'); setStep(0);}} />
+                <div className="p-8 text-center flex-1 flex flex-col justify-center">
+                  <div className={`w-24 h-24 text-white rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg ${isCardLocked ? 'bg-slate-600 shadow-slate-600/30' : 'bg-emerald-500 shadow-emerald-500/30'}`}>
+                    {isCardLocked ? '🔒' : '🔓'}
+                  </div>
+                  <h2 className={`font-black text-2xl mb-2 uppercase ${isCardLocked ? 'text-slate-700' : 'text-emerald-600'}`}>
+                    {isCardLocked ? 'ĐÃ KHÓA THẺ' : 'THẺ ĐANG HOẠT ĐỘNG'}
+                  </h2>
+                  <p className="text-slate-500 text-sm mb-10 px-4">
+                    {isCardLocked 
+                      ? 'Thẻ VISA của bạn đã bị khóa tạm thời. Mọi giao dịch sẽ bị từ chối.' 
+                      : 'Thẻ VISA đã được mở khóa. Bạn có thể tiếp tục thanh toán trực tuyến.'}
+                  </p>
+                  <button onClick={() => {setMode('card_manage'); setStep(0);}} className="w-full py-4 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl shadow-md text-sm transition-all">
+                    ĐÓNG
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* CHỨC NĂNG: LUỒNG CHUYỂN TIỀN (TRANSFER) */}
         {mode === 'transfer' && (
@@ -832,14 +1279,15 @@ export default function App() {
         {/* MÀN HÌNH CÁ NHÂN (PROFILE) */}
         {mode === 'profile' && (
           <Profile 
-            userName={currentUser?.fullname || "NGƯỜI DÙNG VNU"} 
+            currentUser={currentUser} 
             logo={vnuShieldLogo}
             onLogout={handleLogout} 
+            onGoToUpdateFace={() => { setMode('update_face'); setStep(1); setErrorMessage(''); }} // <-- THÊM DÒNG NÀY
           />
         )}
 
         {/* CẬP NHẬT: THANH MENU BOTTOM NAV (Hiển thị thêm khi topup ở bước 0) */}
-        {(mode === 'home' || mode === 'qr' || mode === 'history' || mode === 'profile' || (mode === 'transfer' && step === 0) || (mode === 'topup' && step === 0)) && (
+        {(mode === 'home' || mode === 'qr' || mode === 'history' || mode === 'profile' || (mode === 'transfer' && step === 0) || (mode === 'topup' && step === 0) || (mode === 'card_manage' && step === 0)) && (
           <BottomNav 
             mode={mode} 
             setMode={setMode} 

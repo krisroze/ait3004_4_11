@@ -76,3 +76,22 @@ class TopupRequest(BaseModel):
     phone_number: str    # Số điện thoại cần nạp
     amount: int          # Mệnh giá nạp (VD: 10000, 20000)
     image_data: str      # Ảnh khuôn mặt để xác thực giao dịch
+
+# =======================================================================
+# THÊM MỚI: KHUÔN MẪU CHO TÍNH NĂNG MUA TÀI KHOẢN SỐ ĐẸP
+# =======================================================================
+class BuyBeautifulAccountRequest(BaseModel):
+    old_account_number: str
+    new_account_number: str
+    amount: int
+    image_data: str
+
+# =======================================================================
+# THÊM MỚI: KHUÔN MẪU CHO TÍNH NĂNG THANH TOÁN HÓA ĐƠN
+# =======================================================================
+class BillPaymentRequest(BaseModel):
+    account_number: str
+    bill_provider: str   # Tên nhà cung cấp (VD: Điện lực EVN)
+    customer_code: str   # Mã khách hàng
+    amount: int
+    image_data: str
