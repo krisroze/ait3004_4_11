@@ -47,7 +47,7 @@ services:
       - minio_data:/data
 
   backend_api:
-    build: ./backend
+    image: synth7a/vnubank-backend:latest
     container_name: backend_api
     restart: always
     volumes:
@@ -67,7 +67,7 @@ services:
       - minio
 
   frontend_app:
-    build: ./frontend
+    image: synth7a/vnubank-frontend:latest
     container_name: frontend_app
     ports:
       - "5173:5173"
@@ -86,7 +86,7 @@ services:
     restart: always
 
   backend_worker:
-    build: ./backend
+    image: synth7a/vnubank-backend:latest
     container_name: backend_worker
     restart: always
     volumes:
