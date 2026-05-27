@@ -15,7 +15,7 @@ from app.face_service import verify_face, upsert_face_embedding
 from app.routers.verify import router as verify_router
 from app.database import engine, get_db, Base
 from app.models import Transfer, User
-from app.schemas import UserRegisterRequest, UserResponse, TransferExecutionRequest  
+from app.schemas import UserRegisterRequest, UserResponse, TransferExecutionRequest, BuyBeautifulAccountRequest, BillPaymentRequest
 from app.minio_service import upload_base64_image  # Service đẩy ảnh giao dịch lên MinIO
 
 # ======================================================================
@@ -393,6 +393,173 @@ from app.celery_app import celery_app
 def get_job(job_id: str):
     res = AsyncResult(job_id, app=celery_app)
     return {"id": job_id, "state": res.state, "result": res.result if res.successful() else None}
+
+# =======================================================================
+# API MUA TÀI KHOẢN SỐ ĐẸP (ĐỔI SỐ TÀI KHOẢN)
+# =======================================================================
+@app.post("/api/buy-beautiful-account", status_code=status.HTTP_200_OK)
+def buy_beautiful_account(request: BuyBeautifulAccountRequest, db: Session = Depends(get_db)):
+    REFERENCE_FOLDER = "reference_faces"
+    
+    # 1. Kiểm tra tài khoản hiện tại
+    user = db.query(User).filter(User.account_number == request.old_account_number).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản người dùng!")
+        
+    # 2. Kiểm tra số tài khoản mới đã có ai dùng chưa
+    existing_new_acc = db.query(User).filter(User.account_number == request.new_account_number).first()
+    if existing_new_acc:
+        raise HTTPException(status_code=400, detail="Số tài khoản này đã có người sở hữu, vui lòng chọn số khác!")
+        
+    # 3. Kiểm tra số dư
+    if user.balance < request.amount:
+        raise HTTPException(status_code=400, detail="Số dư không đủ để thanh toán phí mua tài khoản!")
+
+    # 4. Xác thực FaceID
+    old_photo_path = os.path.join(REFERENCE_FOLDER, f"{user.account_number}.jpg")
+    if not os.path.exists(old_photo_path):
+        raise HTTPException(status_code=400, detail="Lỗi hệ thống: Không tìm thấy ảnh sinh trắc học gốc!")
+
+    try:
+        image_data = request.image_data
+        if "," in image_data:
+            image_data = image_data.split(",")[1]
+        image_bytes = base64.b64decode(image_data)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
+
+        result = DeepFace.verify(
+            img1_path=temp_path,
+            img2_path=old_photo_path,
+            model_name="VGG-Face",
+            enforce_detection=False
+        )
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        if float(result["distance"]) > 0.35: # MATCH_THRESHOLD
+            raise HTTPException(status_code=401, detail="Xác thực khuôn mặt thất bại!")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi quét khuôn mặt.")
+
+    # 5. Nếu xác thực thành công -> Tiến hành trừ tiền và đổi số
+    try:
+        # A. Trừ tiền
+        user.balance -= request.amount
+        
+        # B. Đổi tên file ảnh trong thư mục (QUAN TRỌNG NHẤT)
+        new_photo_path = os.path.join(REFERENCE_FOLDER, f"{request.new_account_number}.jpg")
+        os.rename(old_photo_path, new_photo_path)
+        
+        # Xóa Cache AI
+        pkl_files = glob.glob(os.path.join(REFERENCE_FOLDER, "*.pkl"))
+        for pkl_file in pkl_files:
+            os.remove(pkl_file)
+            
+        # C. Cập nhật Số tài khoản trong Database
+        user.account_number = request.new_account_number
+        user.face_id = f"{request.new_account_number}.jpg"
+
+        # D. Lưu vào lịch sử giao dịch
+        new_transfer = Transfer(
+            transaction_type="buy_account",
+            recipient_name="VNU Bank (Phí đổi số)",
+            account_number=request.new_account_number,
+            amount=int(request.amount),
+            status="SUCCESS",
+            transaction_time=datetime.datetime.now(),
+            snapshot_url="https://ui-avatars.com/api/?name=VNU&background=0D8ABC&color=fff" # Ảnh placeholder
+        )
+        db.add(new_transfer)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Đổi tài khoản số đẹp thành công!",
+            "new_account": user.account_number,
+            "new_balance": user.balance
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Lỗi database: {str(e)}")
+
+# =======================================================================
+# API THANH TOÁN HÓA ĐƠN (ĐIỆN, NƯỚC, INTERNET)
+# =======================================================================
+@app.post("/api/pay-bill", status_code=status.HTTP_200_OK)
+def pay_bill_api(request: BillPaymentRequest, db: Session = Depends(get_db)):
+    REFERENCE_FOLDER = "reference_faces"
+    
+    user = db.query(User).filter(User.account_number == request.account_number).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản người dùng!")
+        
+    if user.balance < request.amount:
+        raise HTTPException(status_code=400, detail="Số dư không đủ để thanh toán hóa đơn này!")
+
+    # Xác thực FaceID
+    photo_path = os.path.join(REFERENCE_FOLDER, f"{user.account_number}.jpg")
+    if not os.path.exists(photo_path):
+        raise HTTPException(status_code=400, detail="Chưa đăng ký khuôn mặt sinh trắc học!")
+
+    try:
+        image_data = request.image_data
+        if "," in image_data:
+            image_data = image_data.split(",")[1]
+        image_bytes = base64.b64decode(image_data)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
+
+        result = DeepFace.verify(
+            img1_path=temp_path,
+            img2_path=photo_path,
+            model_name="VGG-Face",
+            enforce_detection=False
+        )
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        if float(result["distance"]) > 0.35: 
+            raise HTTPException(status_code=401, detail="Xác thực khuôn mặt thất bại! Từ chối giao dịch.")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi quét AI.")
+
+    # Thanh toán thành công -> Trừ tiền & Lưu lịch sử
+    try:
+        user.balance -= request.amount
+        
+        # Gọi job Celery để upload ảnh lên MinIO giống như chuyển tiền
+        job = upload_snapshot_task.delay(request.image_data)
+        snapshot_url = job.get(timeout=20)
+
+        new_transfer = Transfer(
+            transaction_type="bill_payment",
+            recipient_name=f"Thanh toán: {request.bill_provider}",
+            account_number=request.customer_code,
+            amount=int(request.amount),
+            status="SUCCESS",
+            transaction_time=datetime.datetime.now(),
+            snapshot_url=snapshot_url
+        )
+        db.add(new_transfer)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Thanh toán hóa đơn thành công!",
+            "new_balance": user.balance
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Lỗi database: {str(e)}")
 
 
 # ==========================================
