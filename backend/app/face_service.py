@@ -1,106 +1,149 @@
-from deepface import DeepFace
+import os
 import base64
 import tempfile
-import os
-from pathlib import Path
+from typing import Optional, Dict, Any, List
 
-REFERENCE_FOLDER = "reference_faces"
+from deepface import DeepFace
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qm
 
-# 🎯 ĐỊNH NGHĨA NGƯỠNG AN TOÀN (FINETUNE THRESHOLD)
-# Với mô hình VGG-Face, mặc định thư viện là 0.40.
-# Vì đây là ứng dụng Thanh toán (Face Payment App), ta siết chặt xuống 0.35 để an toàn hơn.
-MATCH_THRESHOLD = 0.35
+QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant_db")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "face_embeddings")
 
-def verify_face(image_data: str):
+MODEL_NAME = os.getenv("FACE_MODEL_NAME", "VGG-Face")
+
+MATCH_THRESHOLD = float(os.getenv("FACE_MATCH_THRESHOLD", "0.35"))
+
+client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+
+
+def _ensure_collection(vector_size: int) -> None:
+    collections = client.get_collections().collections
+    if any(c.name == QDRANT_COLLECTION for c in collections):
+        return
+
+    client.create_collection(
+        collection_name=QDRANT_COLLECTION,
+        vectors_config=qm.VectorParams(
+            size=vector_size,
+            distance=qm.Distance.COSINE,
+        ),
+    )
+
+
+def _save_temp_image_from_base64(image_data: str) -> str:
+    if "," in image_data:
+        image_data = image_data.split(",")[1]
+    image_bytes = base64.b64decode(image_data)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as f:
+        f.write(image_bytes)
+        return f.name
+
+
+def get_embedding(image_data: str) -> List[float]:
+    """
+    Returns a single embedding vector for the image (first detected face).
+    """
+    temp_path = _save_temp_image_from_base64(image_data)
     try:
-        # xử lý base64
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-
-        image_bytes = base64.b64decode(image_data)
-
-        # lưu ảnh input
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-            temp_file.write(image_bytes)
-            temp_path = temp_file.name
-
-        # search trong database reference (So khớp 1:N)
-        result = DeepFace.find(
+        reps = DeepFace.represent(
             img_path=temp_path,
-            db_path=REFERENCE_FOLDER,
-            model_name="VGG-Face",
-            enforce_detection=False
+            model_name=MODEL_NAME,
+            enforce_detection=False,
         )
-        
-        os.remove(temp_path)
+        if not reps:
+            raise ValueError("No embedding produced")
 
-        # result[0] là dataframe chứa danh sách những người giống nhất
-        if len(result[0]) == 0:
-            return None
+        emb = reps[0].get("embedding")
+        if emb is None:
+            raise ValueError("No embedding in DeepFace output")
 
-        # Lấy người có tỉ lệ giống nhất (đứng đầu danh sách)
-        best_match = result[0].iloc[0]
-        distance = float(best_match["distance"])
+        emb = [float(x) for x in emb]
+        _ensure_collection(vector_size=len(emb))
+        return emb
+    finally:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
 
-        # 🛠️ CHỐT CHẶN BẢO MẬT: Kiểm tra xem có phải người lạ không
-        # Nếu khoảng cách lớn hơn ngưỡng quy định -> Coi như người lạ, từ chối nhận diện!
-        if distance > MATCH_THRESHOLD:
-            print(f"[AI Alert] Phat hien nguoi la! Khoang cach gan nhat la {distance} (Vuot nguong an toan {MATCH_THRESHOLD})")
-            return None
 
-        return {
-            "identity": Path(best_match["identity"]).stem,
-            "distance": distance
-        }
+def upsert_face_embedding(account_number: str, image_data: str) -> bool:
+    """
+    Store/update embedding for a given account_number in Qdrant.
+    """
+    emb = get_embedding(image_data)
 
-    except Exception as e:
-        print("Face recognition error:", e)
+    client.upsert(
+        collection_name=QDRANT_COLLECTION,
+        points=[
+            qm.PointStruct(
+                id=str(account_number),
+                vector=emb,
+                payload={"account_number": str(account_number)},
+            )
+        ],
+    )
+    return True
+
+
+def search_face(image_data: str) -> Optional[Dict[str, Any]]:
+    emb = get_embedding(image_data)
+
+    hits = client.search(
+        collection_name=QDRANT_COLLECTION,
+        query_vector=emb,
+        limit=1,
+        with_payload=True,
+    )
+
+    if not hits:
         return None
 
+    best = hits[0]
+    return {
+        "account_number": (best.payload or {}).get("account_number", str(best.id)),
+        "score": float(best.score),
+    }
 
-def verify_face_by_account(image_data: str, account_number: str):
+
+def verify_face(image_data: str) -> Optional[Dict[str, Any]]:
     """
-    Hàm này dùng cho Đăng nhập và Quên mật khẩu. 
-    So sánh trực tiếp ảnh chụp với ảnh tham chiếu của riêng tài khoản đó (So khớp 1:1).
+    Old behavior: identify who it is (1:N).
+    New: search Qdrant and apply threshold.
     """
-    try:
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
+    res = search_face(image_data)
+    if not res:
+        return None
 
-        image_bytes = base64.b64decode(image_data)
+    return res
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-            temp_file.write(image_bytes)
-            temp_path = temp_file.name
 
-        # Tạo đường dẫn tới file ảnh gốc của người dùng này (VD: reference_faces/23072006.jpg)
-        reference_path = os.path.join(REFERENCE_FOLDER, f"{account_number}.jpg")
-        
-        # Nếu không tìm thấy file ảnh gốc trong hệ thống -> Từ chối luôn
-        if not os.path.exists(reference_path):
-            os.remove(temp_path)
-            print(f"[Error] Không tìm thấy ảnh gốc của tài khoản {account_number}")
-            return False
+def verify_face_by_account(image_data: str, account_number: str) -> bool:
+    emb = get_embedding(image_data)
 
-        # So sánh 1:1 bằng DeepFace.verify
-        result = DeepFace.verify(
-            img1_path=temp_path,
-            img2_path=reference_path,
-            model_name="VGG-Face",
-            enforce_detection=False
-        )
-        
-        os.remove(temp_path)
+    point = client.retrieve(
+        collection_name=QDRANT_COLLECTION,
+        ids=[str(account_number)],
+        with_vectors=True,
+        with_payload=False,
+    )
 
-        distance = result.get("distance", 1.0)
-        
-        # Áp dụng chốt chặn bảo mật
-        if distance > MATCH_THRESHOLD:
-            print(f"[AI Alert] Cảnh báo người lạ xâm nhập! Khoảng cách {distance} vượt ngưỡng {MATCH_THRESHOLD}")
-            return False
-
-        return result.get("verified", False)
-
-    except Exception as e:
-        print("Lỗi so khớp tài khoản:", e)
+    if not point:
         return False
+
+    ref_vec = point[0].vector
+    if ref_vec is None:
+        return False
+
+    import math
+
+    def dot(a, b): return sum(x * y for x, y in zip(a, b))
+    def norm(a): return math.sqrt(sum(x * x for x in a))
+
+    sim = dot(emb, ref_vec) / (norm(emb) * norm(ref_vec) + 1e-12)
+    distance = 1.0 - sim
+
+    return distance <= MATCH_THRESHOLD

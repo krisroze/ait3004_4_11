@@ -14,8 +14,8 @@ router = APIRouter()
 # =========================================================
 # API: ĐĂNG NHẬP BẰNG FACEID
 # =========================================================
-@router.post("/api/login-face")
-def login_face_api(request: LoginFaceRequest):
+@router.post("/api/verify-face-account")
+def verify_face_account_api(request: LoginFaceRequest):
     # Xác thực 1:1 xem ảnh chụp có khớp với ảnh gốc của tài khoản không
     is_match = verify_face_by_account(request.image_data, request.account_number)
     

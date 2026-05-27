@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from deepface import DeepFace  # Import DeepFace để phục vụ việc quét mặt đăng nhập trực tiếp
+from app.face_service import verify_face, upsert_face_embedding
 
 # Import các router và database
 from app.routers.verify import router as verify_router
@@ -94,68 +95,38 @@ def login_user(request: UserLoginRequest, db: Session = Depends(get_db)):
 # ==========================================
 @app.post("/api/login-face", status_code=status.HTTP_200_OK)
 def login_by_face(request: FaceLoginRequest, db: Session = Depends(get_db)):
-    REFERENCE_FOLDER = "reference_faces"
-    TEMP_FOLDER = "temp_login_faces"
-    
-    if not os.path.exists(REFERENCE_FOLDER) or not os.listdir(REFERENCE_FOLDER):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Hệ thống chưa có dữ liệu FaceID mẫu. Vui lòng đăng nhập bằng mật khẩu trước!"
-        )
-
     try:
-        # 1. Giải mã dữ liệu ảnh Base64 gửi lên từ camera của Frontend
-        image_data = request.image_data
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-        image_bytes = base64.b64decode(image_data)
+        match = verify_face(request.image_data)  # uses Qdrant search
+        if not match:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Không nhận diện được khuôn mặt hoặc tài khoản chưa đăng ký FaceID!"
+            )
 
-        # 2. Lưu ảnh chụp hiện tại vào một thư mục tạm thời để DeepFace quét đối chiếu
-        os.makedirs(TEMP_FOLDER, exist_ok=True)
-        temp_filename = f"login_{uuid.uuid4().hex}.jpg"
-        temp_path = os.path.join(TEMP_FOLDER, temp_filename)
+        account_number = match["account_number"]
 
-        with open(temp_path, "wb") as f:
-            f.write(image_bytes)
+        user = db.query(User).filter(User.account_number == account_number).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy tài khoản trong hệ thống!"
+            )
 
-        # 3. Dùng DeepFace.find để quét và tìm kiếm khuôn mặt khớp nhất trong kho ảnh mẫu
-        dfs = DeepFace.find(
-            img_path=temp_path,
-            db_path=REFERENCE_FOLDER,
-            enforce_detection=False,
-            model_name="VGG-Face"  
-        )
+        return {
+            "status": "success",
+            "message": f"Xin chào {user.fullname}, Đăng nhập khuôn mặt thành công!",
+            "fullname": user.fullname,
+            "balance": user.balance,
+            "account_number": user.account_number,
+            "phone_number": user.phone_number,
+            # optional debug:
+            "match_score": match.get("score"),
+        }
 
-        # Xóa ngay ảnh tạm sau khi AI quét xong để tránh rác ổ đĩa
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
-        # 4. KIỂM TRA ĐÃ FIX LỖI: .empty không còn ()
-        if len(dfs) > 0 and not dfs[0].empty:
-            # Lấy đường dẫn của bức ảnh khớp nhất ở dòng đầu tiên
-            matched_image_path = dfs[0].iloc[0]['identity']
-            filename = os.path.basename(matched_image_path)
-            account_number = os.path.splitext(filename)[0]
-
-            # 5. Tìm thông tin người dùng trong cơ sở dữ liệu dựa trên Số tài khoản vừa tìm được
-            user = db.query(User).filter(User.account_number == account_number).first()
-            if user:
-                return {
-                    "status": "success",
-                    "message": f"Xin chào {user.fullname}, Đăng nhập khuôn mặt thành công!",
-                    "fullname": user.fullname,
-                    "balance": user.balance,
-                    "account_number": user.account_number,
-                    "phone_number": user.phone_number  # ĐÃ THÊM: Trả về số điện thoại sau khi quét mặt thành công
-                }
-
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Không nhận diện được khuôn mặt hoặc tài khoản chưa đăng ký FaceID!"
-        )
-
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[Face Login Error] Lỗi quét mặt: {e}")
+        print(f"[Face Login Error - Qdrant] {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi hệ thống khi đối sánh khuôn mặt: {str(e)}"
@@ -251,6 +222,8 @@ def register_user(request: UserRegisterRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
 
+        upsert_face_embedding(request.account_number, request.image_data)
+
         return new_user
 
     except Exception as e:
@@ -285,6 +258,8 @@ def update_face(request: UpdateFaceRequest, db: Session = Depends(get_db)):
         with open(image_path, "wb") as f:
             f.write(image_bytes)
 
+        upsert_face_embedding(request.account_number, request.image_data)
+        
         pkl_files = glob.glob(os.path.join(REFERENCE_FOLDER, "*.pkl"))
         for pkl_file in pkl_files:
             os.remove(pkl_file)
