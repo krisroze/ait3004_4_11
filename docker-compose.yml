@@ -1,3 +1,6 @@
+include:
+  - docker-compose.monitoring.yml
+
 services:
   mysql_db:
     image: mysql:8.0
