@@ -2,6 +2,7 @@ import os
 import base64
 import tempfile
 from typing import Optional, Dict, Any, List
+import uuid
 
 from deepface import DeepFace
 from qdrant_client import QdrantClient
@@ -70,17 +71,17 @@ def get_embedding(image_data: str) -> List[float]:
             pass
 
 
+
 def upsert_face_embedding(account_number: str, image_data: str) -> bool:
-    """
-    Store/update embedding for a given account_number in Qdrant.
-    """
     emb = get_embedding(image_data)
+
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"face:{account_number}"))
 
     client.upsert(
         collection_name=QDRANT_COLLECTION,
         points=[
             qm.PointStruct(
-                id=str(account_number),
+                id=point_id,
                 vector=emb,
                 payload={"account_number": str(account_number)},
             )
@@ -92,20 +93,23 @@ def upsert_face_embedding(account_number: str, image_data: str) -> bool:
 def search_face(image_data: str) -> Optional[Dict[str, Any]]:
     emb = get_embedding(image_data)
 
-    hits = client.search(
+    res = client.query_points(
         collection_name=QDRANT_COLLECTION,
-        query_vector=emb,
+        query=emb,
         limit=1,
         with_payload=True,
     )
 
-    if not hits:
+    points = res.points or []
+    if not points:
         return None
 
-    best = hits[0]
+    best = points[0]
+    payload = best.payload or {}
+
     return {
-        "account_number": (best.payload or {}).get("account_number", str(best.id)),
-        "score": float(best.score),
+        "account_number": payload.get("account_number", str(best.id)),
+        "score": float(best.score) if best.score is not None else None,
     }
 
 
@@ -123,10 +127,11 @@ def verify_face(image_data: str) -> Optional[Dict[str, Any]]:
 
 def verify_face_by_account(image_data: str, account_number: str) -> bool:
     emb = get_embedding(image_data)
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"face:{account_number}"))
 
     point = client.retrieve(
         collection_name=QDRANT_COLLECTION,
-        ids=[str(account_number)],
+        ids=[point_id],
         with_vectors=True,
         with_payload=False,
     )
